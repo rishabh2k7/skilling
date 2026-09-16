@@ -13,6 +13,16 @@
     />
   </head>
   <body>
+    <script>
+      /* Apply the saved theme before first paint (defaults to dark) to avoid a light flash.
+         Must match the AppProvider key/format; React re-syncs the class after mount. */
+      try {
+        var t = JSON.parse(localStorage.getItem("skilling-theme") || '"dark"').replace(/"/g, "");
+        if (t === "dark") document.documentElement.classList.add("dark");
+      } catch (e) {
+        document.documentElement.classList.add("dark");
+      }
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

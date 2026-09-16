@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
@@ -53,8 +53,15 @@ const ROLE_NAVS = {
 export function AppProvider({ children }) {
   const [role, setRole] = useState("student");
   const [theme, setTheme] = useState(
-    () => localStorage.getItem("skilling-theme")?.replace(/"/g, "") || "light"
+    () => localStorage.getItem("skilling-theme")?.replace(/"/g, "") || "dark"
   );
+
+  /* Keep <html> in sync — the early-paint script in index.html sets the class
+     there too (before React loads), and body's background resolves against it. */
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }, [theme]);
+
   const toggleTheme = () =>
     setTheme((t) => {
       const next = t === "light" ? "dark" : "light";
