@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.freebuff
+.env
+*.log
+README.md
+render.yaml
+railway.json

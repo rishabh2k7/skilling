@@ -65,6 +65,30 @@ npm run build     # outputs dist/
 npm start         # serves API + built frontend on http://localhost:3001
 ```
 
+## Deploy (Render / Railway — one click)
+
+The repo ships with everything both platforms need: a multi-stage `Dockerfile`, a Render
+Blueprint (`render.yaml`), and Railway config (`railway.json`). The container builds the
+frontend, installs production dependencies only, and serves the API + static app on one port.
+
+**Render** (free tier works):
+1. Push this repo to GitHub (already done).
+2. On dashboard.render.com: **New + → Blueprint**, pick `rishabh2k7/skilling`, **Apply**.
+3. After it deploys, go to **Environment** and add one AI key, e.g. `GROQ_API_KEY` — the service
+   redeploys automatically and the Support Desk chat goes live.
+
+**Railway**:
+1. On railway.app: **New Project → Deploy from GitHub repo**, pick `skilling`.
+2. Railway reads `railway.json` (Dockerfile + `/api/health` healthcheck) — no other setup.
+3. In the service → **Variables**, add your AI key, e.g. `GROQ_API_KEY`.
+
+Both platforms inject `PORT` automatically; the server honors it. Docker run locally:
+
+```bash
+docker build -t skilling .
+docker run -p 3001:3001 --env-file .env skilling
+```
+
 ## Notes
 
 - All content on the pages is demo data in `src/data/skillingData.js` — edit it there.

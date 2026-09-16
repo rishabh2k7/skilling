@@ -1,0 +1,17 @@
+# Render Blueprint — deploys with "New +" → "Blueprint" after connecting the repo.
+# Add your AI key in the Render dashboard after the first deploy
+# (Environment → OPENAI_API_KEY or GROQ_API_KEY etc.).
+
+services:
+  - type: web
+    name: skilling
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Add these in the dashboard (do not commit real keys):
+      # OPENAI_API_KEY   / ANTHROPIC_API_KEY / GEMINI_API_KEY
+      # GROQ_API_KEY     / OPENROUTER_API_KEY
+      # AI_PROVIDER (optional, when several keys are set)
