@@ -3,49 +3,51 @@
 @tailwind utilities;
 
 /* ===== Design tokens (extracted from the deployed Skilling app) ===== */
+/* Light mode palette — coolors.co: Celadon / White Smoke / Stone Brown / Silver */
 :root {
-  --background: 42 35% 94%;
-  --foreground: 231 28% 18%;
-  --border: 41 22% 84%;
-  --input: 41 22% 84%;
-  --ring: 176 60% 35%;
-  --card: 42 40% 98%;
-  --card-foreground: 231 28% 18%;
-  --card-border: 41 22% 86%;
-  --primary: 231 36% 24%;
-  --primary-foreground: 42 35% 94%;
-  --secondary: 173 35% 89%;
-  --secondary-foreground: 176 60% 28%;
-  --muted: 41 22% 89%;
-  --muted-foreground: 229 13% 47%;
-  --accent: 63 73% 61%;
-  --accent-foreground: 231 36% 17%;
+  --background: 100 10% 94%;        /* #F0F2EF White Smoke */
+  --foreground: 35 16% 20%;         /* deep Stone Brown for readable text */
+  --border: 30 8% 81%;              /* Silver, lightened */
+  --input: 30 8% 81%;
+  --ring: 113 30% 35%;              /* deep Celadon */
+  --card: 100 14% 98%;              /* White Smoke, brighter */
+  --card-foreground: 35 16% 20%;
+  --card-border: 30 8% 86%;
+  --primary: 36 14% 32%;            /* #5C5346 Stone Brown */
+  --primary-foreground: 100 10% 95%; /* White Smoke */
+  --secondary: 113 30% 89%;         /* pale Celadon wash */
+  --secondary-foreground: 113 26% 26%; /* deep Celadon green */
+  --muted: 30 8% 89%;               /* Silver tint */
+  --muted-foreground: 30 7% 40%;   /* Silver, darkened for contrast */
+  --accent: 113 34% 75%;            /* #AFD5AA Celadon */
+  --accent-foreground: 35 18% 16%;  /* deep Stone Brown */
   --destructive: 4 68% 48%;
-  --destructive-foreground: 42 35% 96%;
-  --sidebar: 231 36% 24%;
-  --sidebar-foreground: 42 35% 94%;
+  --destructive-foreground: 100 10% 96%;
+  --sidebar: 35 15% 27%;            /* deep Stone Brown */
+  --sidebar-foreground: 100 10% 95%;
   --radius: 0.8rem;
   --app-font-sans: "Manrope", sans-serif;
   --app-font-mono: "DM Mono", monospace;
   --font-display: "Space Grotesk", sans-serif;
-  --shadow-card: 0 18px 50px #1e234212;
+  --shadow-card: 0 18px 50px #3a322614;
 }
 
 .dark {
   color-scheme: dark;
+  color: hsl(var(--foreground));   /* re-anchor inherited text color inside the dark wrapper */
   --background: 0 0% 7%;
-  --foreground: 0 0% 94%;
+  --foreground: 0 0% 96%;         /* near-white body text */
   --border: 0 0% 24%;
   --input: 0 0% 24%;
   --card: 0 0% 11%;
-  --card-foreground: 0 0% 94%;
+  --card-foreground: 0 0% 96%;
   --card-border: 0 0% 24%;
   --primary: 0 0% 4%;
   --primary-foreground: 0 0% 94%;
   --secondary: 0 0% 18%;
   --secondary-foreground: 173 39% 78%;
   --muted: 0 0% 16%;
-  --muted-foreground: 0 0% 66%;
+  --muted-foreground: 0 0% 74%;   /* lighter grey for readable dark-mode text */
   --accent: 63 73% 61%;
   --accent-foreground: 0 0% 5%;
   --destructive: 4 60% 56%;
@@ -93,8 +95,8 @@ body:before {
 }
 
 .grid-paper {
-  background-image: linear-gradient(#242b530b 1px, #0000 1px),
-    linear-gradient(90deg, #242b530b 1px, #0000 1px);
+  background-image: linear-gradient(#5c53460d 1px, #0000 1px),
+    linear-gradient(90deg, #5c53460d 1px, #0000 1px);
   background-size: 30px 30px;
 }
 
