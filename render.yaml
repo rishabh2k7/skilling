@@ -11,6 +11,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATA_DIR
+        value: /var/data   # Render persistent disk mount point (attach a disk in the dashboard)
       # Add these in the dashboard (do not commit real keys):
       # OPENAI_API_KEY   / ANTHROPIC_API_KEY / GEMINI_API_KEY
       # GROQ_API_KEY     / OPENROUTER_API_KEY

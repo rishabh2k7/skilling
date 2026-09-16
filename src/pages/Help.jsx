@@ -1,58 +1,53 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bot, Radar, Send, Sparkles } from "lucide-react";
 import { Badge, Button, PageHeader, PageTransition, Reveal } from "@/components/ui";
-import { useLocalState } from "@/hooks/useLocalState";
+import { useChatHistory, useSendChat } from "@/lib/api";
 
 const SUGGESTIONS = ["Why is Docker next?", "How do I show evidence?", "What should I do this week?"];
 
-/** Calls the Express backend /api/ai/chat which proxies to your chosen AI provider. */
-async function askAI(question, history) {
-  const res = await fetch("/api/ai/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: question, history }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Request failed (${res.status})`);
-  }
-  const data = await res.json();
-  return data.reply;
-}
-
 export default function Help() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useLocalState("skilling-help-messages", []);
-  const [thinking, setThinking] = useState(false);
-  const [error, setError] = useState("");
+  const [optimistic, setOptimistic] = useState([]); // messages not yet confirmed by refetch
+  const { data: history = [] } = useChatHistory(true);
+  const sendMutation = useSendChat();
   const scrollRef = useRef(null);
+
+  const thinking = sendMutation.isPending;
+  const messages = [...history, ...optimistic];
+
+  useEffect(() => {
+    // clear optimistic entries once the server history includes them
+    if (optimistic.length && history.length) {
+      setOptimistic((pending) =>
+        pending.filter(
+          (p) =>
+            !history.some(
+              (h) => h.from === p.from && h.text === p.text
+            )
+        )
+      );
+    }
+  }, [history, optimistic.length]);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!input.trim() || thinking) return;
     const question = input.trim();
-    const history = messages.slice(-8);
-    setMessages([...messages, { from: "user", text: question }]);
     setInput("");
-    setThinking(true);
-    setError("");
-    try {
-      const reply = await askAI(question, history);
-      setMessages((prev) => [...prev, { from: "ai", text: reply }]);
-    } catch (err) {
-      setError(err.message);
-      setMessages((prev) => [
-        ...prev,
-        {
-          from: "ai",
-          text: "I could not reach the AI service. Add your API key to the .env file (see README) and restart the server.",
-        },
-      ]);
-    } finally {
-      setThinking(false);
-      requestAnimationFrame(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight));
-    }
+    setOptimistic((prev) => [...prev, { from: "user", text: question }]);
+    sendMutation.mutate(question, {
+      onError: () => {
+        setOptimistic((prev) => [
+          ...prev,
+          {
+            from: "ai",
+            text: "I could not reach the AI service. Add your API key to the .env file (see README) and restart the server.",
+          },
+        ]);
+      },
+    });
+    requestAnimationFrame(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight));
   };
 
   return (
@@ -60,7 +55,7 @@ export default function Help() {
       <PageHeader
         eyebrow="Support desk / AI assistant"
         title="A second pair of eyes for your next move."
-        copy="Ask about your Skill DNA, roadmap, or how to make your evidence clearer. Answers come from the AI model configured on the server."
+        copy="Ask about your Skill DNA, roadmap, or how to make your evidence clearer. Answers come from the AI model configured on the server, and the conversation is saved."
       />
 
       <div className="grid gap-5 lg:grid-cols-[.7fr_1.3fr]">
@@ -97,7 +92,9 @@ export default function Help() {
             </div>
             <div>
               <p className="text-sm font-bold">Skilling support</p>
-              <p className="text-[10px] text-[hsl(var(--muted-foreground))]">AI assistant via /api/ai/chat</p>
+              <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                Saved to the server · {messages.length} messages
+              </p>
             </div>
             <Badge tone={thinking ? "accent" : "teal"}>{thinking ? "Thinking" : "Ready"}</Badge>
           </div>
@@ -109,7 +106,7 @@ export default function Help() {
                   <Bot className="mx-auto text-[hsl(var(--muted-foreground))]" size={25} />
                   <p className="mt-3 text-sm font-bold">Start with a real question.</p>
                   <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-                    Your conversation stays in this browser.
+                    Your conversation is stored on the server.
                   </p>
                 </div>
               </div>
@@ -117,7 +114,7 @@ export default function Help() {
             <AnimatePresence initial={false}>
               {messages.map((m, i) => (
                 <motion.div
-                  key={`${m.from}-${i}`}
+                  key={`${m.from}-${i}-${m.text.slice(0, 12)}`}
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   data-testid={`support-message-${i}`}
@@ -126,7 +123,7 @@ export default function Help() {
                   <div
                     className={`max-w-[85%] whitespace-pre-line rounded-xl px-4 py-3 text-sm leading-6 ${
                       m.from === "user"
-                        ? "bg-[hsl(var(--primary))] text-white"
+                        ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
                         : "bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"
                     }`}
                   >
@@ -142,7 +139,6 @@ export default function Help() {
                 </div>
               </motion.div>
             )}
-            {error && <p className="text-xs font-bold text-[hsl(var(--destructive))]">{error}</p>}
           </div>
 
           <form onSubmit={submit} className="flex gap-2 border-t border-[hsl(var(--border))] pt-4">

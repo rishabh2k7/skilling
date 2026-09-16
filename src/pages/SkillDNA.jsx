@@ -2,17 +2,28 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Lightbulb, Radar } from "lucide-react";
 import { Badge, PageHeader, PageTransition, Reveal, AnimatedNumber, ProgressBar, EASE } from "@/components/ui";
-import { SKILLS } from "@/data/skillingData";
+import { useSkills } from "@/lib/api";
+
+const SIGNAL_SOURCES = [
+  ["Coursework", "React Foundations", "verified", 88],
+  ["Assessment", "JavaScript checkpoint", "verified", 76],
+  ["Evidence", "2 projects linked", "in progress", 54],
+];
 
 export default function SkillDNA({ navigate }) {
   const [view, setView] = useState("bars");
+  const { data, isLoading } = useSkills();
+
+  const skills = data?.skills ?? [];
+  const readiness = data?.readiness ?? 64;
+  const role = data?.role ?? "Full Stack Developer";
 
   return (
     <PageTransition>
       <PageHeader
         eyebrow="Skill intelligence / 01"
         title="Your Skill DNA"
-        copy="A living view of the capabilities behind your Full Stack Developer goal. Scores are demo signals from coursework, self-assessment, and evidence."
+        copy="A living view of the capabilities behind your Full Stack Developer goal. Scores come from the server."
         action={
           <div className="flex rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1">
             <button
@@ -44,14 +55,16 @@ export default function SkillDNA({ navigate }) {
               <p className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
                 Role alignment
               </p>
-              <h2 className="mt-2 font-display text-2xl font-bold">Full Stack Developer</h2>
+              <h2 className="mt-2 font-display text-2xl font-bold">{role}</h2>
             </div>
-            <Badge tone="accent">64 readiness</Badge>
+            <Badge tone="accent">{readiness} readiness</Badge>
           </div>
 
-          {view === "bars" ? (
+          {isLoading ? (
+            <p className="mt-8 text-sm text-[hsl(var(--muted-foreground))]">Loading signals…</p>
+          ) : view === "bars" ? (
             <div className="mt-8 space-y-6">
-              {SKILLS.map((skill, i) => (
+              {skills.map((skill, i) => (
                 <motion.div
                   key={skill.name}
                   initial={{ opacity: 0, x: -10 }}
@@ -86,7 +99,7 @@ export default function SkillDNA({ navigate }) {
             </div>
           ) : (
             <div className="mt-8 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {SKILLS.map((skill, i) => (
+              {skills.map((skill, i) => (
                 <motion.div
                   key={skill.name}
                   initial={{ opacity: 0, scale: 0.9 }}
@@ -143,11 +156,7 @@ export default function SkillDNA({ navigate }) {
               <Radar size={18} className="text-[hsl(var(--muted-foreground))]" />
             </div>
             <div className="mt-5 space-y-4">
-              {[
-                ["Coursework", "React Foundations", "verified", 88],
-                ["Assessment", "JavaScript checkpoint", "verified", 76],
-                ["Evidence", "2 projects linked", "in progress", 54],
-              ].map(([kind, detail, status, value]) => (
+              {SIGNAL_SOURCES.map(([kind, detail, status, value]) => (
                 <div key={kind}>
                   <div className="flex justify-between text-xs">
                     <span className="font-semibold">

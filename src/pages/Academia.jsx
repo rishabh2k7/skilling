@@ -1,17 +1,22 @@
 import { useState } from "react";
-import { ArrowRight, FileText, GraduationCap, Lightbulb, Radar, TrendingUp, Users } from "lucide-react";
+import { FileText, Lightbulb, Radar, TrendingUp, Users } from "lucide-react";
 import { Button, PageHeader, PageTransition, MetricCard, ProgressBar } from "@/components/ui";
-import { CURRICULUM_PULSE, INTERVENTIONS } from "@/data/skillingData";
+import { useAcademia } from "@/lib/api";
 
 export default function Academia({ navigate }) {
+  const { data } = useAcademia();
   const [statusMsg, setStatusMsg] = useState("");
+
+  const pulses = data?.pulses ?? [];
+  const interventions = data?.interventions ?? [];
+  const stats = data?.stats;
 
   return (
     <PageTransition>
       <PageHeader
         eyebrow="Academia workspace / Demo cohort"
         title="Make learning outcomes visible."
-        copy="Connect curriculum, learner progress, and industry language without reducing students to a single score. This is synthetic demo data."
+        copy="Connect curriculum, learner progress, and industry language without reducing students to a single score. Data is served by the backend."
         action={
           <Button
             onClick={() => setStatusMsg("Cohort report prepared locally.")}
@@ -33,10 +38,10 @@ export default function Academia({ navigate }) {
       )}
 
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Active learners" value="1,284" detail="across 6 pathways" icon={Users} />
-        <MetricCard label="Mapped skills" value="96" detail="role-aligned signals" icon={Radar} />
-        <MetricCard label="Evidence created" value="3,412" detail="projects + reflections" icon={FileText} />
-        <MetricCard label="Pathway lift" value="+14" detail="readiness points" icon={TrendingUp} />
+        <MetricCard label="Active learners" value={String(stats?.activeLearners ?? 1284)} detail="across 6 pathways" icon={Users} />
+        <MetricCard label="Mapped skills" value={String(stats?.mappedSkills ?? 96)} detail="role-aligned signals" icon={Radar} />
+        <MetricCard label="Evidence created" value={String(stats?.evidenceCreated ?? 3412)} detail="projects + reflections" icon={FileText} />
+        <MetricCard label="Pathway lift" value={`+${stats?.pathwayLift ?? 14}`} detail="readiness points" icon={TrendingUp} />
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[.85fr_1.15fr]">
@@ -46,14 +51,14 @@ export default function Academia({ navigate }) {
           </p>
           <h2 className="mt-2 font-display text-2xl font-bold">Where learners are getting stuck</h2>
           <div className="mt-7 space-y-5">
-            {CURRICULUM_PULSE.map(([label, pct, detail]) => (
-              <div key={label}>
+            {pulses.map((p) => (
+              <div key={p.label}>
                 <div className="mb-2 flex justify-between text-sm">
-                  <span className="font-bold">{label}</span>
-                  <span className="font-mono text-xs">{pct}%</span>
+                  <span className="font-bold">{p.label}</span>
+                  <span className="font-mono text-xs">{p.percent}%</span>
                 </div>
-                <ProgressBar value={pct} accent={pct < 60} />
-                <p className="mt-1 text-[10px] text-[hsl(var(--muted-foreground))]">{detail}</p>
+                <ProgressBar value={p.percent} accent={p.percent < 60} />
+                <p className="mt-1 text-[10px] text-[hsl(var(--muted-foreground))]">{p.detail}</p>
               </div>
             ))}
           </div>
@@ -72,21 +77,21 @@ export default function Academia({ navigate }) {
             <Lightbulb size={21} className="text-[hsl(var(--secondary-foreground))]" />
           </div>
           <div className="mt-6 divide-y divide-[hsl(var(--border))]">
-            {INTERVENTIONS.map(([title, detail, action], i) => (
-              <div key={title} className="flex items-center gap-4 py-4 first:pt-0 last:pb-0">
+            {interventions.map((item, i) => (
+              <div key={item.title} className="flex items-center gap-4 py-4 first:pt-0 last:pb-0">
                 <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[hsl(var(--muted))] font-mono text-xs">
                   {String(i + 1).padStart(2, "0")}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold">{title}</p>
-                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{detail}</p>
+                  <p className="text-sm font-bold">{item.title}</p>
+                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{item.detail}</p>
                 </div>
                 <button
                   onClick={() => navigate("/help")}
                   data-testid={`button-intervention-${i}`}
                   className="shrink-0 text-xs font-bold text-[hsl(var(--secondary-foreground))]"
                 >
-                  {action}
+                  {item.action}
                 </button>
               </div>
             ))}

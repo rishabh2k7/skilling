@@ -1,25 +1,34 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Box, CheckCircle2, Code, FileText, Lightbulb, Sparkles, Target } from "lucide-react";
+import {
+  Box,
+  CheckCircle2,
+  Code,
+  FileText,
+  Lightbulb,
+  Sparkles,
+  Target,
+} from "lucide-react";
 import { Badge, Button, PageHeader, PageTransition, Reveal, ProgressBar, EASE } from "@/components/ui";
-import { useLocalState } from "@/hooks/useLocalState";
-import { ROADMAP_STEPS } from "@/data/skillingData";
+import { useRoadmap, useToggleRoadmapStep } from "@/lib/api";
+
+const STEP_ICONS = {
+  intent: Target,
+  foundations: Code,
+  docker: Box,
+  assessment: Target,
+  evidence: FileText,
+};
 
 export default function Roadmap() {
-  const [completed, setCompleted] = useLocalState("skilling-roadmap-completed", []);
+  const { data, isLoading } = useRoadmap();
+  const toggleMutation = useToggleRoadmapStep();
   const [briefGenerated, setBriefGenerated] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [statusMsg, setStatusMsg] = useState("");
 
-  const toggle = (id, title) => {
-    const next = completed.includes(id)
-      ? completed.filter((x) => x !== id)
-      : [...completed, id];
-    setCompleted(next);
-    setStatusMsg(
-      next.includes(id) ? `${title} marked complete.` : `${title} reopened.`
-    );
-  };
+  const steps = data?.steps ?? [];
+  const done = data?.done ?? 0;
+  const total = data?.total ?? 5;
 
   return (
     <PageTransition>
@@ -27,7 +36,7 @@ export default function Roadmap() {
         eyebrow="Skill intelligence / 03"
         title="Your next-best-skill roadmap"
         copy="A focused sequence from gap to evidence. Start with Docker because it creates the clearest bridge to your target role."
-        action={<Badge tone="accent">{completed.length} / 5 complete</Badge>}
+        action={<Badge tone="accent">{done} / {total} complete</Badge>}
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_.72fr]">
@@ -40,104 +49,96 @@ export default function Roadmap() {
               <h2 className="mt-2 font-display text-2xl font-bold">From gap to proof</h2>
             </div>
             <div className="w-28">
-              <ProgressBar value={(completed.length / 5) * 100} accent />
+              <ProgressBar value={(done / Math.max(total, 1)) * 100} accent />
             </div>
           </div>
 
-          <div className="relative space-y-3">
-            <motion.div
-              initial={{ scaleY: 0 }}
-              whileInView={{ scaleY: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.9, ease: EASE }}
-              className="absolute bottom-7 left-[19px] top-7 w-px origin-top bg-gradient-to-b from-[hsl(var(--secondary-foreground))] via-[hsl(var(--accent))] to-[hsl(var(--border))]"
-            />
-            {ROADMAP_STEPS.map((step, i) => {
-              const done = completed.includes(step.id) || step.status === "complete";
-              const isNext = !done && step.id === "docker";
-              const Icon = step.icon;
-              return (
-                <motion.div
-                  key={step.id}
-                  initial={{ opacity: 0, x: -14 }}
-                  whileInView={{ opacity: 1, x: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.1, duration: 0.45, ease: EASE }}
-                  className="relative flex items-center gap-4 rounded-xl p-3 transition hover:bg-[hsl(var(--muted))]"
-                >
+          {isLoading ? (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading roadmap…</p>
+          ) : (
+            <div className="relative space-y-3">
+              <motion.div
+                initial={{ scaleY: 0 }}
+                whileInView={{ scaleY: 1 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.9, ease: EASE }}
+                className="absolute bottom-7 left-[19px] top-7 w-px origin-top bg-gradient-to-b from-[hsl(var(--secondary-foreground))] via-[hsl(var(--accent))] to-[hsl(var(--border))]"
+              />
+              {steps.map((step, i) => {
+                const isDone = step.status === "complete";
+                const isNext = !isDone && step.status === "next";
+                const Icon = STEP_ICONS[step.id] || Sparkles;
+                const toggleable = ["docker", "assessment", "evidence"].includes(step.id);
+                return (
                   <motion.div
-                    animate={
-                      isNext
-                        ? {
-                            boxShadow: [
-                              "0 0 0 0 hsl(var(--accent) / 0)",
-                              "0 0 0 7px hsl(var(--accent) / .12)",
-                              "0 0 0 0 hsl(var(--accent) / 0)",
-                            ],
-                          }
-                        : { scale: done ? [1, 1.08, 1] : 1 }
-                    }
-                    transition={isNext ? { repeat: Infinity, duration: 2.2 } : { duration: 0.4 }}
-                    className={`z-10 grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
-                      done
-                        ? "bg-[hsl(var(--secondary-foreground))] text-white"
-                        : isNext
-                          ? "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"
-                          : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]"
-                    }`}
+                    key={step.id}
+                    initial={{ opacity: 0, x: -14 }}
+                    whileInView={{ opacity: 1, x: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: i * 0.1, duration: 0.45, ease: EASE }}
+                    className="relative flex items-center gap-4 rounded-xl p-3 transition hover:bg-[hsl(var(--muted))]"
                   >
-                    {done ? (
-                      <CheckCircle2 size={18} />
+                    <motion.div
+                      animate={
+                        isNext
+                          ? {
+                              boxShadow: [
+                                "0 0 0 0 hsl(var(--accent) / 0)",
+                                "0 0 0 7px hsl(var(--accent) / .12)",
+                                "0 0 0 0 hsl(var(--accent) / 0)",
+                              ],
+                            }
+                          : { scale: isDone ? [1, 1.08, 1] : 1 }
+                      }
+                      transition={isNext ? { repeat: Infinity, duration: 2.2 } : { duration: 0.4 }}
+                      className={`z-10 grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
+                        isDone
+                          ? "bg-[hsl(var(--secondary-foreground))] text-white"
+                          : isNext
+                            ? "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]"
+                            : "bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]"
+                      }`}
+                    >
+                      {isDone ? <CheckCircle2 size={18} /> : <Icon size={17} />}
+                    </motion.div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                        {step.label}
+                      </p>
+                      <p className="mt-1 text-sm font-bold">{step.title}</p>
+                    </div>
+                    {toggleable ? (
+                      <button
+                        onClick={() =>
+                          toggleMutation.mutate({ stepId: step.id, complete: !isDone })
+                        }
+                        data-testid={`button-toggle-${step.id}`}
+                        className={`rounded-lg px-3 py-2 text-xs font-bold ${
+                          isDone
+                            ? "bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"
+                            : "border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
+                        }`}
+                      >
+                        {isDone ? "Complete" : step.id === "docker" ? "Start" : "Mark done"}
+                      </button>
                     ) : (
-                      <StepIcon step={step} />
+                      <motion.span
+                        initial={{ opacity: 0, x: 12 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.35 + i * 0.08 }}
+                        className={`text-[10px] font-bold uppercase tracking-wider ${
+                          isDone
+                            ? "text-[hsl(var(--secondary-foreground))]"
+                            : "text-[hsl(var(--muted-foreground))]"
+                        }`}
+                      >
+                        {isDone ? "Complete" : step.status}
+                      </motion.span>
                     )}
                   </motion.div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-                      {step.label}
-                    </p>
-                    <p className="mt-1 text-sm font-bold">{step.title}</p>
-                  </div>
-                  {["docker", "assessment", "evidence"].includes(step.id) ? (
-                    <button
-                      onClick={() => toggle(step.id, step.title)}
-                      data-testid={`button-toggle-${step.id}`}
-                      className={`rounded-lg px-3 py-2 text-xs font-bold ${
-                        done
-                          ? "bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]"
-                          : "border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
-                      }`}
-                    >
-                      {done ? "Complete" : step.id === "docker" ? "Start" : "Mark done"}
-                    </button>
-                  ) : (
-                    <motion.span
-                      initial={{ opacity: 0, x: 12 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.35 + i * 0.08 }}
-                      className={`text-[10px] font-bold uppercase tracking-wider ${
-                        done
-                          ? "text-[hsl(var(--secondary-foreground))]"
-                          : "text-[hsl(var(--muted-foreground))]"
-                      }`}
-                    >
-                      {done ? "Complete" : step.status}
-                    </motion.span>
-                  )}
-                </motion.div>
-              );
-            })}
-          </div>
-
-          {statusMsg && (
-            <motion.p
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              data-testid="status-roadmap"
-              className="mt-5 rounded-lg bg-[hsl(var(--secondary))] px-3 py-2 text-xs font-bold text-[hsl(var(--secondary-foreground))]"
-            >
-              {statusMsg}
-            </motion.p>
+                );
+              })}
+            </div>
           )}
         </Reveal>
 
@@ -219,16 +220,4 @@ export default function Roadmap() {
       </div>
     </PageTransition>
   );
-}
-
-function StepIcon({ step }) {
-  const icons = {
-    intent: Target,
-    foundations: Code,
-    docker: Box,
-    assessment: Target,
-    evidence: FileText,
-  };
-  const Icon = icons[step.id] || Sparkles;
-  return <Icon size={17} />;
 }

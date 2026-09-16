@@ -31,8 +31,41 @@ sensitive ships to clients.
 
 | File | Purpose |
 | --- | --- |
-| `server/index.js` | Express app: `/api/health`, `/api/skills`, `POST /api/ai/chat`, serves `dist/` in production |
+| `server/index.js` | Express app: profile, skills, opportunities, roadmap, assessments, AI chat, academia — serves `dist/` in production |
+| `server/db.js` | SQLite schema + seed data + query helpers (better-sqlite3) |
 | `server/ai.js` | Provider layer + system prompt. Add new providers to the `PROVIDERS` array |
+
+## Data storage
+
+The backend uses **SQLite** (via `better-sqlite3`) — a single file at `data/skilling.db`.
+
+- **Zero setup**: the database file is created and seeded with demo data on first boot.
+- **Delete `data/skilling.db`** to reset to fresh demo state.
+- **Where data lives**: set `DATA_DIR` env var to change the folder. In Docker the app writes
+to `/app/data`; attach a volume there (Railway: already configured in `railway.json`; Render:
+attach a persistent disk at `/var/data` and set `DATA_DIR=/var/data`) so data survives redeploys.
+- **Tables**: `profiles`, `skills`, `opportunities`, `saved_opportunities`, `roadmap_steps`,
+`assessments`, `assessment_attempts`, `chat_messages`, `curriculum_pulses`, `interventions`.
+- Outgrowing SQLite? The queries are plain SQL via helpers in `server/db.js`, so migrating to
+Postgres later means swapping `better-sqlite3` for `pg` and keeping the same helper functions.
+
+## API endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | Health + AI provider status |
+| GET | `/api/profile` | Demo learner profile |
+| GET | `/api/skills` | Skill DNA (role, readiness, skills) |
+| GET | `/api/opportunities` | Opportunities + saved/applied state |
+| POST | `/api/opportunities/:id/save` | Toggle saved |
+| POST | `/api/opportunities/:id/apply` | Set applied true/false |
+| GET | `/api/roadmap` | Roadmap steps + progress |
+| POST | `/api/roadmap/:stepId` | Mark step complete/incomplete |
+| GET | `/api/assessments/next` | Next checkpoint question |
+| POST | `/api/assessments/:id/attempt` | Submit answer (server-graded) |
+| POST | `/api/ai/chat` | AI chat (persisted to DB) |
+| GET | `/api/ai/chat/history` | Chat history |
+| GET | `/api/academia` | Curriculum pulses, interventions, stats |
 
 Add your own endpoint in three lines:
 

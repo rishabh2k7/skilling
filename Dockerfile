@@ -19,6 +19,11 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
 COPY --from=build /app/dist ./dist
 
+# SQLite database lives here (persist via a volume in production)
+ENV DATA_DIR=/app/data
+RUN mkdir -p /app/data
+VOLUME ["/app/data"]
+
 # Render / Railway inject PORT; defaults to 3001 locally
 EXPOSE 3001
 

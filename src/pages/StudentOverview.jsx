@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, BookOpen, CheckCircle2, Clock, FileText, PlayCircle, Target, TrendingUp } from "lucide-react";
+import {
+  ArrowRight,
+  BookOpen,
+  CheckCircle2,
+  Clock,
+  FileText,
+  PlayCircle,
+  Target,
+  TrendingUp,
+} from "lucide-react";
 import { Badge, Button, PageHeader, PageTransition, AnimatedNumber, EASE } from "@/components/ui";
-import { useLocalState } from "@/hooks/useLocalState";
+import { useSkills } from "@/lib/api";
 import { MOMENTUM } from "@/data/skillingData";
 
-function ReadinessCard({ readiness = 64 }) {
+function ReadinessCard({ readiness = 64, nextBest = "Docker", targetRole = "Full Stack Developer" }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.97 }}
@@ -17,8 +26,8 @@ function ReadinessCard({ readiness = 64 }) {
       <div className="relative flex items-start justify-between">
         <div>
           <Badge tone="accent">Role target</Badge>
-          <h2 className="mt-4 font-display text-2xl font-bold">Full Stack Developer</h2>
-          <p className="mt-1 text-xs text-white/55">Readiness snapshot · demo data</p>
+          <h2 className="mt-4 font-display text-2xl font-bold">{targetRole}</h2>
+          <p className="mt-1 text-xs text-white/55">Readiness snapshot · from server</p>
         </div>
         <div
           className="metric-ring grid h-[92px] w-[92px] place-items-center rounded-full"
@@ -43,7 +52,7 @@ function ReadinessCard({ readiness = 64 }) {
             className="mt-1 flex items-center gap-1.5 text-sm font-bold"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--accent))]" />
-            Docker
+            {nextBest}
           </motion.p>
         </div>
         <span className="font-mono text-xs text-[hsl(var(--accent))]">+8 pts possible</span>
@@ -53,9 +62,13 @@ function ReadinessCard({ readiness = 64 }) {
 }
 
 export default function StudentOverview({ navigate }) {
-  const [completed, setCompleted] = useLocalState("skilling-roadmap-completed", []);
+  const { data: skillsData } = useSkills();
   const [statusMsg, setStatusMsg] = useState("");
-  const started = completed.includes("docker");
+  const [projectStarted, setProjectStarted] = useState(false);
+
+  const readiness = skillsData?.readiness ?? 64;
+  const nextBest = skillsData?.nextBestSkill ?? "Docker";
+  const targetRole = skillsData?.role ?? "Full Stack Developer";
 
   return (
     <PageTransition>
@@ -71,7 +84,7 @@ export default function StudentOverview({ navigate }) {
       />
 
       <div className="grid gap-5 lg:grid-cols-[1.25fr_.75fr]">
-        <ReadinessCard />
+        <ReadinessCard readiness={readiness} nextBest={nextBest} targetRole={targetRole} />
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-[var(--shadow-card)]">
           <div className="flex items-center justify-between">
             <div>
@@ -94,19 +107,17 @@ export default function StudentOverview({ navigate }) {
             </span>
             <Button
               onClick={() => {
-                setCompleted(
-                  started ? completed.filter((id) => id !== "docker") : [...completed, "docker"]
-                );
+                setProjectStarted(!projectStarted);
                 setStatusMsg(
-                  started
+                  projectStarted
                     ? "Project moved back to your roadmap."
                     : "Containerized REST API started."
                 );
               }}
-              variant={started ? "outline" : "primary"}
+              variant={projectStarted ? "outline" : "primary"}
               testId="button-start-project"
             >
-              {started ? (
+              {projectStarted ? (
                 <>
                   <CheckCircle2 size={15} /> In progress
                 </>
@@ -179,9 +190,9 @@ export default function StudentOverview({ navigate }) {
           </div>
           <div className="mt-5 space-y-3">
             {[
-              ["docker", "Build", "Containerized REST API","4–6 hrs", BookOpen, "/student/roadmap"],
-  ["assessment", "Validate", "Take the Docker checkpoint", "8 min", Target, "/student/assessment"],
-  ["evidence", "Show", "Add a project reflection", "10 min", FileText, "/student/roadmap"],
+              ["docker", "Build", "Containerized REST API", "4–6 hrs", BookOpen, "/student/roadmap"],
+              ["assessment", "Validate", "Take the Docker checkpoint", "8 min", Target, "/student/assessment"],
+              ["evidence", "Show", "Add a project reflection", "10 min", FileText, "/student/roadmap"],
             ].map(([id, kind, title, time, Icon, path]) => (
               <button
                 key={id}
@@ -211,4 +222,3 @@ export default function StudentOverview({ navigate }) {
     </PageTransition>
   );
 }
-
