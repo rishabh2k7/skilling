@@ -1,0 +1,239 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Design tokens (extracted from the deployed Skilling app) ===== */
+:root {
+  --background: 42 35% 94%;
+  --foreground: 231 28% 18%;
+  --border: 41 22% 84%;
+  --input: 41 22% 84%;
+  --ring: 176 60% 35%;
+  --card: 42 40% 98%;
+  --card-foreground: 231 28% 18%;
+  --card-border: 41 22% 86%;
+  --primary: 231 36% 24%;
+  --primary-foreground: 42 35% 94%;
+  --secondary: 173 35% 89%;
+  --secondary-foreground: 176 60% 28%;
+  --muted: 41 22% 89%;
+  --muted-foreground: 229 13% 47%;
+  --accent: 63 73% 61%;
+  --accent-foreground: 231 36% 17%;
+  --destructive: 4 68% 48%;
+  --destructive-foreground: 42 35% 96%;
+  --sidebar: 231 36% 24%;
+  --sidebar-foreground: 42 35% 94%;
+  --radius: 0.8rem;
+  --app-font-sans: "Manrope", sans-serif;
+  --app-font-mono: "DM Mono", monospace;
+  --font-display: "Space Grotesk", sans-serif;
+  --shadow-card: 0 18px 50px #1e234212;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: 0 0% 7%;
+  --foreground: 0 0% 94%;
+  --border: 0 0% 24%;
+  --input: 0 0% 24%;
+  --card: 0 0% 11%;
+  --card-foreground: 0 0% 94%;
+  --card-border: 0 0% 24%;
+  --primary: 0 0% 4%;
+  --primary-foreground: 0 0% 94%;
+  --secondary: 0 0% 18%;
+  --secondary-foreground: 173 39% 78%;
+  --muted: 0 0% 16%;
+  --muted-foreground: 0 0% 66%;
+  --accent: 63 73% 61%;
+  --accent-foreground: 0 0% 5%;
+  --destructive: 4 60% 56%;
+  --destructive-foreground: 0 0% 96%;
+  --sidebar: 0 0% 3%;
+  --sidebar-foreground: 0 0% 94%;
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background-color: hsl(var(--background));
+    font-family: var(--app-font-sans);
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* ===== Signature visual details from the original site ===== */
+body:before {
+  content: "";
+  pointer-events: none;
+  opacity: 0.22;
+  z-index: 50;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.08'/%3E%3C/svg%3E");
+  position: fixed;
+  inset: 0;
+}
+
+.app-shell {
+  min-height: 100dvh;
+}
+
+.grid-paper {
+  background-image: linear-gradient(#242b530b 1px, #0000 1px),
+    linear-gradient(90deg, #242b530b 1px, #0000 1px);
+  background-size: 30px 30px;
+}
+
+.metric-ring {
+  background: conic-gradient(hsl(var(--accent)) var(--progress), #ffffff2e 0);
+}
+
+.hero-network-node {
+  animation: 6s ease-in-out infinite networkFloat;
+}
+.hero-network-center {
+  animation: 4s ease-in-out infinite networkPulse;
+}
+.hero-network-lines-active {
+  stroke-dasharray: 8 8;
+  animation: 1.8s linear infinite networkDash;
+}
+.hero-tooltip {
+  animation: 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both tooltipIn;
+}
+.fade-up {
+  animation: 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both fadeUp;
+}
+.delay-1 {
+  animation-delay: 80ms;
+}
+.delay-2 {
+  animation-delay: 0.16s;
+}
+.delay-3 {
+  animation-delay: 0.24s;
+}
+.delay-4 {
+  animation-delay: 0.32s;
+}
+.animate-breathe {
+  animation: 4s ease-in-out infinite breathe;
+}
+
+.thinking-dots {
+  align-items: center;
+  gap: 3px;
+  display: inline-flex;
+}
+.thinking-dots:before,
+.thinking-dots:after {
+  content: "";
+  background: currentColor;
+  border-radius: 999px;
+  width: 4px;
+  height: 4px;
+  animation: 1.1s ease-in-out infinite dotPulse;
+}
+.thinking-dots:after {
+  animation-delay: 0.18s;
+  box-shadow: 7px 0;
+}
+
+@keyframes fadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes networkFloat {
+  0%,
+  to {
+    transform: translate(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+@keyframes networkPulse {
+  0%,
+  to {
+    box-shadow: 0 0 28px hsl(var(--accent) / 0.08);
+  }
+  50% {
+    box-shadow: 0 0 58px hsl(var(--accent) / 0.18);
+  }
+}
+@keyframes networkDash {
+  to {
+    stroke-dashoffset: -32px;
+  }
+}
+@keyframes tooltipIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%);
+  }
+}
+@keyframes breathe {
+  0%,
+  to {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+@keyframes dotPulse {
+  0%,
+  80%,
+  to {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  :before,
+  :after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  .hero-network-node,
+  .hero-network-center,
+  .hero-network-lines-active,
+  .animate-breathe,
+  .thinking-dots:before,
+  .thinking-dots:after {
+    animation: none !important;
+  }
+}
