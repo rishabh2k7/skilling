@@ -18,28 +18,6 @@ import { PageTransition } from "@/components/ui";
 
 const queryClient = new QueryClient();
 
-function WorkspacePage({ children }) {
-  const { role, theme, toggleTheme } = useApp();
-  return (
-    <div className={theme === "dark" ? "dark" : ""}>
-      <AppLayout role={role} theme={theme} toggleTheme={toggleTheme}>
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div key={useLocation()[0]}>{children}</motion.div>
-        </AnimatePresence>
-      </AppLayout>
-    </div>
-  );
-}
-
-function NotFoundWithTheme({ navigate }) {
-  const { theme } = useApp();
-  return (
-    <div className={theme === "dark" ? "dark" : ""}>
-      <NotFound go={navigate} />
-    </div>
-  );
-}
-
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -84,11 +62,16 @@ function Routes() {
   else if (location === "/industry") page = <Industry navigate={go} />;
   else if (location === "/academia") page = <Academia navigate={go} />;
   else if (location === "/help") page = <Help />;
-  else return <NotFoundWithTheme navigate={go} />;
+  else
+    return (
+      <div className={theme === "dark" ? "dark" : ""}>
+        <NotFound go={go} />
+      </div>
+    );
 
   return (
     <div className={theme === "dark" ? "dark" : ""}>
-      <AppLayout role={role} theme={theme} toggleTheme={toggleTheme}>
+      <AppLayout navigate={go} role={role} theme={theme} toggleTheme={toggleTheme}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={location}>
             <PageTransition>{page}</PageTransition>
