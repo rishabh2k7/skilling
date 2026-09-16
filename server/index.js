@@ -164,7 +164,10 @@ app.post("/api/ai/chat", async (req, res) => {
     res.json({ reply, provider: getProviderStatus() });
   } catch (err) {
     console.error("[ai] error:", err.message);
-    res.status(502).json({ error: err.message || "AI request failed" });
+    res.status(err.kind === "not_configured" ? 503 : 502).json({
+      error: err.message || "AI request failed",
+      kind: err.kind || "provider_error",
+    });
   }
 });
 

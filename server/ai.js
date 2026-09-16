@@ -36,7 +36,9 @@ const PROVIDERS = [
   {
     id: "gemini",
     envKey: "GEMINI_API_KEY",
-    model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
+    // flash-lite has a far higher free-tier request limit than the flagship
+    // flash models (which allow only ~20 req/min and 429 within seconds)
+    model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   },
   {
@@ -78,8 +80,11 @@ export function getProviderStatus() {
 export async function askAI(message, history = [], context = {}) {
   const provider = activeProvider();
   if (!provider) {
-    throw new Error(
-      "No AI provider configured. Add one API key to .env: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY."
+    throw Object.assign(
+      new Error(
+        "No AI provider configured. Add one API key to .env: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY."
+      ),
+      { kind: "not_configured" }
     );
   }
 
@@ -101,31 +106,62 @@ export async function askAI(message, history = [], context = {}) {
     { role: "user", content: message },
   ];
 
-  const response = await fetch(provider.baseUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(provider.authHeader
-        ? provider.authHeader(process.env[provider.envKey])
-        : { Authorization: `Bearer ${process.env[provider.envKey]}` }),
-      ...(provider.headers || {}),
-    },
-    body: JSON.stringify({
-      model: provider.model,
-      messages,
-      // Gemini's thinking tokens count against this budget — keep headroom
-      max_tokens: provider.id === "gemini" ? 1024 : 400,
-      temperature: 0.7,
-    }),
+  const body = JSON.stringify({
+    model: provider.model,
+    messages,
+    // Gemini's thinking tokens count against this budget — keep headroom
+    max_tokens: provider.id === "gemini" ? 1024 : 400,
+    temperature: 0.7,
   });
+  const headers = {
+    "Content-Type": "application/json",
+    ...(provider.authHeader
+      ? provider.authHeader(process.env[provider.envKey])
+      : { Authorization: `Bearer ${process.env[provider.envKey]}` }),
+    ...(provider.headers || {}),
+  };
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`${provider.id} API error ${response.status}: ${detail.slice(0, 200)}`);
+  /* Free-tier providers (Gemini especially) fail intermittently with 429/503.
+     Retry transient failures — for 429s, Google tells us exactly how long to wait
+     ("Please retry in 32.19s"); wait that long when it's short enough to be sane. */
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(provider.baseUrl, { method: "POST", headers, body });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        const err = new Error(`${provider.id} API error ${response.status}: ${detail.slice(0, 200)}`);
+        err.status = response.status;
+        if (response.status === 429) {
+          const hint = /retry in ([\d.]+)s/i.exec(detail);
+          err.retryIn = hint ? Number(hint[1]) : null;
+        }
+        throw err;
+      }
+      const data = await response.json();
+      const reply = data?.choices?.[0]?.message?.content;
+      if (!reply) throw new Error(`${provider.id} returned no content`);
+      return reply;
+    } catch (err) {
+      lastErr = err;
+      const transient = err.status === 429 || err.status === 503 || err.status === 529 || /fetch failed|network/i.test(err.message || "");
+      if (!transient || attempt === 3) break;
+      // Honor the provider's own retry hint when it exists and is reasonable;
+      // otherwise short backoff for transient 5xx/load errors.
+      let waitMs = attempt * 1200;
+      if (err.status === 429 && err.retryIn != null) {
+        if (err.retryIn > 20) break; // don't hang the request for a long quota window
+        waitMs = err.retryIn * 1000 + 500;
+      }
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
   }
 
-  const data = await response.json();
-  const reply = data?.choices?.[0]?.message?.content;
-  if (!reply) throw new Error(`${provider.id} returned no content`);
-  return reply;
+  if (lastErr.status === 429) {
+    throw Object.assign(new Error("The AI provider rate limit was hit — wait a few seconds and try again."), { kind: "rate_limited" });
+  }
+  if (lastErr.status === 503 || lastErr.status === 529) {
+    throw Object.assign(new Error("The AI model is under heavy load right now — try again in a moment."), { kind: "overloaded" });
+  }
+  throw lastErr;
 }

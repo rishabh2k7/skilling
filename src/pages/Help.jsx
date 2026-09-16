@@ -37,14 +37,19 @@ export default function Help() {
     setInput("");
     setOptimistic((prev) => [...prev, { from: "user", text: question }]);
     sendMutation.mutate(question, {
-      onError: () => {
-        setOptimistic((prev) => [
-          ...prev,
-          {
-            from: "ai",
-            text: "I could not reach the AI service. Add your API key to the .env file (see README) and restart the server.",
-          },
-        ]);
+      onError: (err) => {
+        const msg = String(err?.message || "");
+        let text;
+        if (/rate limit/i.test(msg)) {
+          text = "The AI provider's free-tier rate limit was hit — that usually clears in a few seconds. Please send that again.";
+        } else if (/heavy load|under load/i.test(msg)) {
+          text = "The AI model is under heavy load right now. Give it a moment and try again.";
+        } else if (/no AI provider|not configured/i.test(msg)) {
+          text = "The AI service is not configured on this server. Add an API key to the .env file (see README) and restart the server.";
+        } else {
+          text = "I could not reach the AI service just now. Please try again in a moment.";
+        }
+        setOptimistic((prev) => [...prev, { from: "ai", text }]);
       },
     });
     requestAnimationFrame(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight));
