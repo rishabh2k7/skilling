@@ -11,7 +11,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Badge, Button, PageHeader, PageTransition, AnimatedNumber, EASE } from "@/components/ui";
-import { useSkills } from "@/lib/api";
+import { useSkills, useProfile } from "@/lib/api";
 import { MOMENTUM } from "@/data/skillingData";
 
 function ReadinessCard({ readiness = 64, nextBest = "Docker", targetRole = "Full Stack Developer" }) {
@@ -63,18 +63,21 @@ function ReadinessCard({ readiness = 64, nextBest = "Docker", targetRole = "Full
 
 export default function StudentOverview({ navigate }) {
   const { data: skillsData } = useSkills();
+  const { data: profile } = useProfile();
   const [statusMsg, setStatusMsg] = useState("");
   const [projectStarted, setProjectStarted] = useState(false);
 
   const readiness = skillsData?.readiness ?? 64;
   const nextBest = skillsData?.nextBestSkill ?? "Docker";
   const targetRole = skillsData?.role ?? "Full Stack Developer";
+  const firstName = (profile?.user?.name || profile?.name || "Aarav").split(" ")[0];
+  const isDemo = profile?.isDemo !== false;
 
   return (
     <PageTransition>
       <PageHeader
-        eyebrow="Monday, 14 October · Demo profile"
-        title="Good morning, Aarav."
+        eyebrow={isDemo ? "Monday, 14 October · Demo profile" : "Your personal workspace"}
+        title={`Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${firstName}.`}
         copy="Your path to Full Stack Developer is taking shape. Here is the one move with the most leverage today."
         action={
           <Button onClick={() => navigate("/student/roadmap")} variant="accent" testId="button-open-roadmap">

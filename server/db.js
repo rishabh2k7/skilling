@@ -14,10 +14,26 @@ db.pragma("foreign_keys = ON");
 /* ---------------- Schema ---------------- */
 
 db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  role TEXT NOT NULL,                 -- student | industry | academia
+  role TEXT NOT NULL DEFAULT 'student',                 -- student | industry | academia
   target_role TEXT,
   readiness INTEGER DEFAULT 0,
   next_best_skill TEXT,
@@ -108,6 +124,49 @@ CREATE TABLE IF NOT EXISTS interventions (
 );
 `);
 
+/* ---------------- Migrations (for databases created before a column existed) ----------------
+   CREATE TABLE IF NOT EXISTS never alters an existing table, so old databases miss new columns.
+   ALTER TABLE ... ADD COLUMN only when the column is absent. */
+
+function addColumnIfMissing(table, column, ddl) {
+  const exists = db
+    .prepare(`SELECT 1 FROM pragma_table_info('${table}') WHERE name = ?`)
+    .get(column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+
+addColumnIfMissing("profiles", "user_id", "user_id INTEGER REFERENCES users(id) ON DELETE CASCADE");
+
+/* roadmap_steps originally had a global PRIMARY KEY (id), which made it impossible for
+   two users to both have an "intent" step. Rebuild with a composite key if needed. */
+function rebuildRoadmapStepsIfNeeded() {
+  const pkCols = db
+    .prepare("SELECT name FROM pragma_table_info('roadmap_steps') WHERE pk > 0 ORDER BY pk")
+    .all()
+    .map((r) => r.name);
+  if (pkCols.length === 1 && pkCols[0] === "id") {
+    db.exec(`
+      CREATE TABLE roadmap_steps_new (
+        id TEXT NOT NULL,
+        profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        label TEXT NOT NULL,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        icon TEXT,
+        sort_order INTEGER DEFAULT 0,
+        completed_at TEXT,
+        PRIMARY KEY (id, profile_id)
+      );
+      INSERT INTO roadmap_steps_new (id, profile_id, label, title, status, icon, sort_order, completed_at)
+        SELECT id, profile_id, label, title, status, icon, sort_order, completed_at FROM roadmap_steps;
+      DROP TABLE roadmap_steps;
+      ALTER TABLE roadmap_steps_new RENAME TO roadmap_steps;
+    `);
+    console.log("[db] rebuilt roadmap_steps with composite key (id, profile_id)");
+  }
+}
+rebuildRoadmapStepsIfNeeded();
+
 /* ---------------- Seed (only when empty) ---------------- */
 
 function seed() {
@@ -115,13 +174,13 @@ function seed() {
   if (profileCount > 0) return;
 
   const insProfile = db.prepare(
-    "INSERT INTO profiles (name, role, target_role, readiness, next_best_skill) VALUES (?, 'student', ?, ?, ?)"
+    "INSERT INTO profiles (user_id, name, role, target_role, readiness, next_best_skill) VALUES (NULL, ?, 'student', ?, ?, ?)"
   );
   const profile = db
     .prepare("SELECT id FROM profiles WHERE name = ?")
     .get("Aarav Mehta") ||
     (() => {
-      const info = insProfile.run("Aarav Mehta", "Full Stack Developer", 64, "Docker");
+      const info = insProfile.run("Aarav Mehta (demo)", "Full Stack Developer", 64, "Docker");
       return { id: info.lastInsertRowid };
     })();
 
@@ -210,10 +269,81 @@ seed();
 /* ---------------- Helpers ---------------- */
 
 export const q = {
+  users: {
+    byEmail: (email) =>
+      db.prepare("SELECT * FROM users WHERE email = ?").get(String(email).toLowerCase().trim()),
+    byId: (id) => db.prepare("SELECT id, email, name, created_at FROM users WHERE id = ?").get(id),
+    create: (email, name, passwordHash) =>
+      db
+        .prepare("INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)")
+        .run(String(email).toLowerCase().trim(), name, passwordHash),
+    /* atomic sign-up: create the account AND its profile in one transaction,
+       so a partial failure never leaves an orphaned user without a profile */
+    register: (email, name, passwordHash, targetRole) => {
+      const tx = db.transaction(() => {
+        const info = q.users.create(email, name, passwordHash);
+        const profile = q.profile.createForUser(info.lastInsertRowid, name, targetRole);
+        return { userId: info.lastInsertRowid, profile };
+      });
+      return tx();
+    },
+  },
+  sessions: {
+    create: (userId, token, expiresAt) =>
+      db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(token, userId, expiresAt),
+    get: (token) =>
+      db
+        .prepare(
+          "SELECT s.token, s.expires_at, u.id AS user_id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?"
+        )
+        .get(token),
+    delete: (token) => db.prepare("DELETE FROM sessions WHERE token = ?").run(token),
+    purgeExpired: () => db.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run(),
+  },
   profile: {
     get: (id) => db.prepare("SELECT * FROM profiles WHERE id = ?").get(id),
+    getByUserId: (userId) =>
+      db.prepare("SELECT * FROM profiles WHERE user_id = ? ORDER BY id LIMIT 1").get(userId),
     getDefault: () =>
-      db.prepare("SELECT * FROM profiles ORDER BY id LIMIT 1").get(),
+      db.prepare("SELECT * FROM profiles WHERE user_id IS NULL ORDER BY id LIMIT 1").get(),
+    createForUser: (userId, name, targetRole) => {
+      const existing = db.prepare("SELECT id FROM profiles WHERE user_id = ?").get(userId);
+      if (existing) return db.prepare("SELECT * FROM profiles WHERE id = ?").get(existing.id);
+      const info = db
+        .prepare(
+          "INSERT INTO profiles (user_id, name, role, target_role, readiness, next_best_skill) VALUES (?, ?, 'student', ?, 20, 'Docker')"
+        )
+        .run(userId, name, targetRole || "Full Stack Developer");
+      const profileId = info.lastInsertRowid;
+      // starter Skill DNA — every new user begins with a baseline to grow from
+      const insSkill = db.prepare(
+        "INSERT INTO skills (profile_id, name, value, tone, note, sort_order) VALUES (?, ?, ?, ?, ?, ?)"
+      );
+      [
+        ["JavaScript", 30, "steady", "Baseline — keep building"],
+        ["React", 20, "gap", "Early signal"],
+        ["SQL", 20, "gap", "Early signal"],
+        ["Node.js", 15, "gap", "Not started"],
+        ["Docker", 10, "gap", "Next best skill"],
+        ["AWS", 10, "gap", "Future signal"],
+      ].forEach(([sName, value, tone, note], i) =>
+        insSkill.run(profileId, sName, value, tone, note, i)
+      );
+      // seed the new user's roadmap with the standard sequence
+      const insStep = db.prepare(
+        "INSERT INTO roadmap_steps (id, profile_id, label, title, status, icon, sort_order) VALUES (?, ?, ?, ?, ?, NULL, ?)"
+      );
+      [
+        ["intent", "Career goal", targetRole || "Full Stack Developer", "complete"],
+        ["foundations", "Foundation", "JavaScript + React baseline", "next"],
+        ["docker", "Skill gap", "Containerized REST API", "up next"],
+        ["assessment", "Validate", "Docker checkpoint", "up next"],
+        ["evidence", "Prove", "Project reflection + README", "up next"],
+      ].forEach(([id, label, title, status], i) =>
+        insStep.run(id, profileId, label, title, status, i)
+      );
+      return db.prepare("SELECT * FROM profiles WHERE id = ?").get(profileId);
+    },
   },
   skills: {
     listByProfile: (profileId) =>
@@ -284,9 +414,25 @@ export const q = {
   },
   assessments: {
     firstForProfile: (profileId) => {
-      const a = db
+      let a = db
         .prepare("SELECT * FROM assessments WHERE profile_id = ? ORDER BY id LIMIT 1")
         .get(profileId);
+      if (!a) {
+        // fall back to (and copy from) the demo assessment so new users get a checkpoint too
+        const demo = db
+          .prepare(
+            "SELECT a.* FROM assessments a JOIN profiles p ON p.id = a.profile_id WHERE p.user_id IS NULL ORDER BY a.id LIMIT 1"
+          )
+          .get();
+        if (demo) {
+          db.prepare(
+            "INSERT INTO assessments (profile_id, skill, question, options, correct_index) VALUES (?, ?, ?, ?, ?)"
+          ).run(profileId, demo.skill, demo.question, demo.options, demo.correct_index);
+          a = db
+            .prepare("SELECT * FROM assessments WHERE profile_id = ? ORDER BY id LIMIT 1")
+            .get(profileId);
+        }
+      }
       if (!a) return null;
       return { ...a, options: JSON.parse(a.options) };
     },

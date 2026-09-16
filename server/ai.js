@@ -75,7 +75,7 @@ export function getProviderStatus() {
   return { configured: true, provider: p.id, model: p.model };
 }
 
-export async function askAI(message, history = []) {
+export async function askAI(message, history = [], context = {}) {
   const provider = activeProvider();
   if (!provider) {
     throw new Error(
@@ -83,8 +83,17 @@ export async function askAI(message, history = []) {
     );
   }
 
+  // Personalize the system prompt with the caller's profile when available
+  let systemPrompt = SYSTEM_PROMPT;
+  if (context.profile) {
+    const p = context.profile;
+    systemPrompt +=
+      `\nThe person you are advising is ${p.name}, targeting "${p.target_role || "Full Stack Developer"}" with readiness ${p.readiness}/100.` +
+      (p.user_id ? " They have a personal account." : "");
+  }
+
   const messages = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     ...history
       .filter((m) => m && m.text)
       .slice(-8)

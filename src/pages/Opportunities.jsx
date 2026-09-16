@@ -11,9 +11,9 @@ import {
   X,
 } from "lucide-react";
 import { Badge, Button, PageHeader, PageTransition, AnimatedNumber, EASE } from "@/components/ui";
-import { useOpportunities, useSaveOpportunity, useApplyOpportunity } from "@/lib/api";
+import { useOpportunities, useSaveOpportunity, useApplyOpportunity, useProfile } from "@/lib/api";
 
-function buildDraft(op) {
+function buildDraft(op, firstName = "Aarav") {
   return [
     `Subject: Interested in the ${op.title} opportunity`,
     "",
@@ -22,12 +22,14 @@ function buildDraft(op) {
     "I’m building a Containerized REST API to deepen my Docker signal, and I’d love to learn more about how your team approaches product engineering.",
     "",
     "Best,",
-    "Aarav",
+    firstName,
   ].join("\n");
 }
 
 export default function Opportunities() {
   const { data: opportunities = [], isLoading, error } = useOpportunities();
+  const { data: profile } = useProfile();
+  const firstName = (profile?.user?.name || profile?.name || "Aarav").split(" ")[0];
   const saveMutation = useSaveOpportunity();
   const applyMutation = useApplyOpportunity();
   const [emailOpenId, setEmailOpenId] = useState(null);
@@ -215,7 +217,7 @@ export default function Opportunities() {
                         data-testid={`draft-email-${op.id}`}
                         className="mt-3 whitespace-pre-line text-xs leading-6 text-[hsl(var(--muted-foreground))]"
                       >
-                        {buildDraft(op)}
+                        {buildDraft(op, firstName)}
                       </p>
                       <Button
                         onClick={() => setEmailOpenId(null)}

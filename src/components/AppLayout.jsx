@@ -10,6 +10,7 @@ import {
   Home,
   LayoutDashboard,
   Lightbulb,
+  LogOut,
   MessageCircle,
   Moon,
   Route,
@@ -21,6 +22,8 @@ import {
   X,
 } from "lucide-react";
 import { Brand, Badge } from "@/components/ui";
+import { useAuth } from "@/lib/auth";
+import AuthModal from "@/components/AuthModal";
 
 /* Role + theme context (shared with pages via useApp) */
 const AppContext = createContext(null);
@@ -69,7 +72,19 @@ export function AppProvider({ children }) {
 export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const { user, logout } = useAuth();
   const nav = role === "student" ? STUDENT_NAV : ROLE_NAVS[role];
+
+  const openAuth = (mode) => {
+    setAuthMode(mode);
+    setAuthOpen(true);
+  };
+
+  const initials = user
+    ? user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()
+    : null;
 
   return (
     <div className="app-shell flex bg-[hsl(var(--background))]">
@@ -144,18 +159,52 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
         </div>
 
         <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-          <div className="flex items-center gap-2">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-[hsl(var(--accent))] text-xs font-bold text-[hsl(var(--primary))]">
-              AM
+          {user ? (
+            <div className="flex items-center gap-2">
+              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[hsl(var(--accent))] text-xs font-bold text-[hsl(var(--primary))]" data-testid="user-avatar">
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs font-bold" data-testid="user-name">{user.name}</p>
+                <p className="truncate text-[10px] text-white/45">{user.email}</p>
+              </div>
+              <button
+                onClick={logout}
+                data-testid="button-logout"
+                className="ml-auto shrink-0 rounded-lg p-1.5 text-white/45 transition hover:bg-white/10 hover:text-white"
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut size={15} />
+              </button>
             </div>
-            <div>
-              <p className="text-xs font-bold">Aarav Mehta</p>
-              <p className="text-[10px] text-white/45">Demo learner</p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-white/45">
+                Browsing as demo
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => openAuth("login")}
+                  data-testid="button-login-sidebar"
+                  className="flex-1 rounded-lg bg-[hsl(var(--accent))] px-2 py-2 text-xs font-bold text-[hsl(var(--accent-foreground))] transition hover:-translate-y-0.5"
+                >
+                  Sign in
+                </button>
+                <button
+                  onClick={() => openAuth("register")}
+                  data-testid="button-register-sidebar"
+                  className="flex-1 rounded-lg border border-white/15 px-2 py-2 text-xs font-bold text-white/80 transition hover:bg-white/10"
+                >
+                  Sign up
+                </button>
+              </div>
             </div>
-            <ChevronDown size={14} className="ml-auto text-white/35" />
-          </div>
+          )}
         </div>
       </aside>
+
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
 
       {sidebarOpen && (
         <button
@@ -184,7 +233,9 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
                   ? "Industry workspace"
                   : "Academia workspace"}{" "}
               <span className="mx-2 text-[hsl(var(--border))]">/</span>{" "}
-              <span className="text-[hsl(var(--foreground))]">Demo data</span>
+              <span className="text-[hsl(var(--foreground))]">
+                {user ? "Personal data" : "Demo data"}
+              </span>
             </div>
           </div>
 
@@ -249,9 +300,22 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
             >
               <MessageCircle size={19} />
             </button>
-            <div className="grid h-9 w-9 place-items-center rounded-lg bg-[hsl(var(--primary))] text-xs font-bold text-[hsl(var(--primary-foreground))]">
-              AM
-            </div>
+            {user ? (
+              <div
+                className="grid h-9 w-9 place-items-center rounded-lg bg-[hsl(var(--primary))] text-xs font-bold text-[hsl(var(--primary-foreground))]"
+                title={`${user.name} (${user.email})`}
+              >
+                {initials}
+              </div>
+            ) : (
+              <button
+                onClick={() => openAuth("register")}
+                data-testid="button-signup-header"
+                className="rounded-lg bg-[hsl(var(--accent))] px-3.5 py-2 text-xs font-bold text-[hsl(var(--accent-foreground))] transition hover:-translate-y-0.5"
+              >
+                Sign up
+              </button>
+            )}
           </div>
         </header>
 

@@ -14,6 +14,7 @@ import Academia from "@/pages/Academia";
 import Help from "@/pages/Help";
 import NotFound from "@/pages/NotFound";
 import { AppLayout, AppProvider, useApp } from "@/components/AppLayout";
+import { AuthProvider } from "@/lib/auth";
 import { PageTransition } from "@/components/ui";
 
 const queryClient = new QueryClient();
@@ -21,9 +22,11 @@ const queryClient = new QueryClient();
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppProvider>
-        <Routes />
-      </AppProvider>
+      <AuthProvider>
+        <AppProvider>
+          <Routes />
+        </AppProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

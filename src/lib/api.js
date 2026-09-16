@@ -15,6 +15,10 @@ async function api(path, options = {}) {
 
 /* ---------- queries ---------- */
 
+export function useProfile() {
+  return useQuery({ queryKey: ["profile"], queryFn: () => api("/profile") });
+}
+
 export function useSkills() {
   return useQuery({ queryKey: ["skills"], queryFn: () => api("/skills") });
 }

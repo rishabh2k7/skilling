@@ -5,16 +5,28 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { askAI, getProviderStatus } from "./ai.js";
 import { q } from "./db.js";
+import { sessionMiddleware, authRoutes } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT) > 0 ? Number(process.env.PORT) : 3001;
 
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+app.use(sessionMiddleware);
+authRoutes(app);
 
-/* Resolve the demo profile (single-user demo: first profile in DB) */
-function getProfile() {
+/* Resolve the profile for the current request:
+   - logged in → that user's profile (auto-created if missing)
+   - guest → the shared demo profile */
+function getProfile(req) {
+  if (req.user) {
+    let profile = q.profile.getByUserId(req.user.id);
+    if (!profile) {
+      profile = q.profile.createForUser(req.user.id, req.user.name, "Full Stack Developer");
+    }
+    return profile;
+  }
   return q.profile.getDefault();
 }
 
@@ -26,27 +38,32 @@ app.get("/api/health", (_req, res) => {
 
 /* ---------------- Profile + Skill DNA ---------------- */
 
-app.get("/api/profile", (_req, res) => {
-  const profile = getProfile();
+app.get("/api/profile", (req, res) => {
+  const profile = getProfile(req);
   if (!profile) return res.status(404).json({ error: "no profile" });
-  res.json(profile);
+  res.json({
+    ...profile,
+    isDemo: !req.user,
+    user: req.user ? { id: req.user.id, name: req.user.name, email: req.user.email } : null,
+  });
 });
 
-app.get("/api/skills", (_req, res) => {
-  const profile = getProfile();
+app.get("/api/skills", (req, res) => {
+  const profile = getProfile(req);
   if (!profile) return res.status(404).json({ error: "no profile" });
   res.json({
     role: profile.target_role,
     readiness: profile.readiness,
     nextBestSkill: profile.next_best_skill,
+    isDemo: !req.user,
     skills: q.skills.listByProfile(profile.id),
   });
 });
 
 /* ---------------- Opportunities ---------------- */
 
-app.get("/api/opportunities", (_req, res) => {
-  const profile = getProfile();
+app.get("/api/opportunities", (req, res) => {
+  const profile = getProfile(req);
   const all = q.opportunities.all();
   const saved = profile ? q.opportunities.saved(profile.id) : [];
   const savedMap = Object.fromEntries(saved.map((s) => [s.opportunity_id, s.applied]));
@@ -60,13 +77,13 @@ app.get("/api/opportunities", (_req, res) => {
 });
 
 app.post("/api/opportunities/:id/save", (req, res) => {
-  const profile = getProfile();
+  const profile = getProfile(req);
   const result = q.opportunities.toggleSave(profile.id, Number(req.params.id));
   res.json(result);
 });
 
 app.post("/api/opportunities/:id/apply", (req, res) => {
-  const profile = getProfile();
+  const profile = getProfile(req);
   const applied = !!req.body?.applied;
   const result = q.opportunities.setApplied(profile.id, Number(req.params.id), applied);
   res.json(result);
@@ -74,8 +91,8 @@ app.post("/api/opportunities/:id/apply", (req, res) => {
 
 /* ---------------- Roadmap ---------------- */
 
-app.get("/api/roadmap", (_req, res) => {
-  const profile = getProfile();
+app.get("/api/roadmap", (req, res) => {
+  const profile = getProfile(req);
   if (!profile) return res.status(404).json({ error: "no profile" });
   const steps = q.roadmap.listByProfile(profile.id);
   const done = steps.filter((s) => s.status === "complete").length;
@@ -83,7 +100,7 @@ app.get("/api/roadmap", (_req, res) => {
 });
 
 app.post("/api/roadmap/:stepId", (req, res) => {
-  const profile = getProfile();
+  const profile = getProfile(req);
   const complete = !!req.body?.complete;
   const done = q.roadmap.setComplete(profile.id, req.params.stepId, complete);
   if (done === null) return res.status(404).json({ error: "unknown step" });
@@ -93,8 +110,8 @@ app.post("/api/roadmap/:stepId", (req, res) => {
 
 /* ---------------- Assessments ---------------- */
 
-app.get("/api/assessments/next", (_req, res) => {
-  const profile = getProfile();
+app.get("/api/assessments/next", (req, res) => {
+  const profile = getProfile(req);
   const a = q.assessments.firstForProfile(profile.id);
   if (!a) return res.status(404).json({ error: "no assessments" });
   res.json({
@@ -107,7 +124,7 @@ app.get("/api/assessments/next", (_req, res) => {
 });
 
 app.post("/api/assessments/:id/attempt", (req, res) => {
-  const profile = getProfile();
+  const profile = getProfile(req);
   const selectedIndex = req.body?.selectedIndex;
   if (typeof selectedIndex !== "number") {
     return res.status(400).json({ error: "selectedIndex required" });
@@ -128,7 +145,7 @@ app.post("/api/assessments/:id/attempt", (req, res) => {
   });
 });
 
-/* ---------------- AI chat (persisted) ---------------- */
+/* ---------------- AI chat (persisted per user) ---------------- */
 
 app.post("/api/ai/chat", async (req, res) => {
   try {
@@ -136,10 +153,10 @@ app.post("/api/ai/chat", async (req, res) => {
     if (!message || !String(message).trim()) {
       return res.status(400).json({ error: "message is required" });
     }
-    const profile = getProfile();
+    const profile = getProfile(req);
     const history = q.chat.history(profile.id, 10);
 
-    const reply = await askAI(String(message), history);
+    const reply = await askAI(String(message), history, { profile });
 
     q.chat.add(profile.id, "user", String(message));
     q.chat.add(profile.id, "ai", reply);
@@ -151,8 +168,8 @@ app.post("/api/ai/chat", async (req, res) => {
   }
 });
 
-app.get("/api/ai/chat/history", (_req, res) => {
-  const profile = getProfile();
+app.get("/api/ai/chat/history", (req, res) => {
+  const profile = getProfile(req);
   res.json(q.chat.history(profile.id, 100));
 });
 
