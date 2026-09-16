@@ -36,7 +36,7 @@ const PROVIDERS = [
   {
     id: "gemini",
     envKey: "GEMINI_API_KEY",
-    model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   },
   {
@@ -105,13 +105,16 @@ export async function askAI(message, history = [], context = {}) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env[provider.envKey]}`,
+      ...(provider.authHeader
+        ? provider.authHeader(process.env[provider.envKey])
+        : { Authorization: `Bearer ${process.env[provider.envKey]}` }),
       ...(provider.headers || {}),
     },
     body: JSON.stringify({
       model: provider.model,
       messages,
-      max_tokens: 400,
+      // Gemini's thinking tokens count against this budget — keep headroom
+      max_tokens: provider.id === "gemini" ? 1024 : 400,
       temperature: 0.7,
     }),
   });
