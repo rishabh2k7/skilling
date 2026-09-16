@@ -53,7 +53,7 @@ app.get("/api/opportunities", (_req, res) => {
   res.json(
     all.map((o) => ({
       ...o,
-      saved: !!savedMap[o.id],
+      saved: o.id in savedMap,
       applied: savedMap[o.id] === 1,
     }))
   );
