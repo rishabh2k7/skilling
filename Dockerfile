@@ -1,6 +1,7 @@
 # ---------- Stage 1: build the frontend ----------
-# Debian slim (glibc) + Node 22: better-sqlite3 v13 requires Node >= 22, and its
-# prebuilt binaries download cleanly here — no compile toolchain needed.
+# Debian slim (glibc) + Node 22: better-sqlite3 prebuilt binaries download cleanly
+# here — no compile toolchain needed. (With MongoDB Atlas, better-sqlite3 is the
+# unused fallback driver and never loads.)
 FROM node:22-slim AS build
 WORKDIR /app
 
@@ -18,6 +19,7 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 # Fail the image build immediately if the native module is broken
+# (only relevant when SQLite is the active driver — MONGODB_URI skips it at runtime)
 RUN node -e "require('better-sqlite3'); console.log('better-sqlite3 loads OK')"
 
 COPY server ./server

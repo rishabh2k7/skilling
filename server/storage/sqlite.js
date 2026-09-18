@@ -1,10 +1,12 @@
+/* SQLite storage backend (better-sqlite3) — the original implementation.
+   Async wrapper so it is interchangeable with the Mongo Atlas store. */
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "..", "data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new Database(path.join(DATA_DIR, "skilling.db"));
@@ -70,14 +72,15 @@ CREATE TABLE IF NOT EXISTS saved_opportunities (
 );
 
 CREATE TABLE IF NOT EXISTS roadmap_steps (
-  id TEXT PRIMARY KEY,                -- intent | foundations | docker | assessment | evidence
+  id TEXT NOT NULL,                   -- intent | foundations | docker | assessment | evidence
   profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   label TEXT NOT NULL,
   title TEXT NOT NULL,
   status TEXT NOT NULL,               -- complete | next | up next
   icon TEXT,
   sort_order INTEGER DEFAULT 0,
-  completed_at TEXT
+  completed_at TEXT,
+  PRIMARY KEY (id, profile_id)
 );
 
 CREATE TABLE IF NOT EXISTS assessments (
@@ -124,9 +127,7 @@ CREATE TABLE IF NOT EXISTS interventions (
 );
 `);
 
-/* ---------------- Migrations (for databases created before a column existed) ----------------
-   CREATE TABLE IF NOT EXISTS never alters an existing table, so old databases miss new columns.
-   ALTER TABLE ... ADD COLUMN only when the column is absent. */
+/* ------------- Migrations (old databases miss newer columns/keys) ------------- */
 
 function addColumnIfMissing(table, column, ddl) {
   const exists = db
@@ -137,8 +138,6 @@ function addColumnIfMissing(table, column, ddl) {
 
 addColumnIfMissing("profiles", "user_id", "user_id INTEGER REFERENCES users(id) ON DELETE CASCADE");
 
-/* roadmap_steps originally had a global PRIMARY KEY (id), which made it impossible for
-   two users to both have an "intent" step. Rebuild with a composite key if needed. */
 function rebuildRoadmapStepsIfNeeded() {
   const pkCols = db
     .prepare("SELECT name FROM pragma_table_info('roadmap_steps') WHERE pk > 0 ORDER BY pk")
@@ -176,13 +175,8 @@ function seed() {
   const insProfile = db.prepare(
     "INSERT INTO profiles (user_id, name, role, target_role, readiness, next_best_skill) VALUES (NULL, ?, 'student', ?, ?, ?)"
   );
-  const profile = db
-    .prepare("SELECT id FROM profiles WHERE name = ?")
-    .get("Aarav Mehta") ||
-    (() => {
-      const info = insProfile.run("Aarav Mehta (demo)", "Full Stack Developer", 64, "Docker");
-      return { id: info.lastInsertRowid };
-    })();
+  const info = insProfile.run("Aarav Mehta (demo)", "Full Stack Developer", 64, "Docker");
+  const profileId = info.lastInsertRowid;
 
   const insSkill = db.prepare(
     "INSERT INTO skills (profile_id, name, value, tone, note, sort_order) VALUES (?, ?, ?, ?, ?, ?)"
@@ -195,7 +189,7 @@ function seed() {
     ["Docker", 40, "gap", "Next best skill"],
     ["AWS", 30, "gap", "Future signal"],
   ].forEach(([name, value, tone, note], i) =>
-    insSkill.run(profile.id, name, value, tone, note, i)
+    insSkill.run(profileId, name, value, tone, note, i)
   );
 
   const insOp = db.prepare(
@@ -223,14 +217,14 @@ function seed() {
     ["assessment", "Validate", "Docker checkpoint", "up next"],
     ["evidence", "Prove", "Project reflection + README", "up next"],
   ].forEach(([id, label, title, status], i) =>
-    insStep.run(id, profile.id, label, title, status, null, i)
+    insStep.run(id, profileId, label, title, status, null, i)
   );
 
   const insAssessment = db.prepare(
     "INSERT INTO assessments (profile_id, skill, question, options, correct_index) VALUES (?, ?, ?, ?, ?)"
   );
   insAssessment.run(
-    profile.id,
+    profileId,
     "Docker",
     "What problem does a Docker container primarily solve?",
     JSON.stringify([
@@ -266,56 +260,65 @@ function seed() {
 
 seed();
 
-/* ---------------- Helpers ---------------- */
+/* ---------------- Helpers (async signatures for store parity) ---------------- */
 
 export const q = {
+  driver: "sqlite",
   users: {
-    byEmail: (email) =>
+    byEmail: async (email) =>
       db.prepare("SELECT * FROM users WHERE email = ?").get(String(email).toLowerCase().trim()),
-    byId: (id) => db.prepare("SELECT id, email, name, created_at FROM users WHERE id = ?").get(id),
-    create: (email, name, passwordHash) =>
-      db
+    byId: async (id) =>
+      db.prepare("SELECT id, email, name, created_at FROM users WHERE id = ?").get(id),
+    register: async (email, name, passwordHash, targetRole) => {
+      const info = db
         .prepare("INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)")
-        .run(String(email).toLowerCase().trim(), name, passwordHash),
-    /* atomic sign-up: create the account AND its profile in one transaction,
-       so a partial failure never leaves an orphaned user without a profile */
-    register: (email, name, passwordHash, targetRole) => {
-      const tx = db.transaction(() => {
-        const info = q.users.create(email, name, passwordHash);
-        const profile = q.profile.createForUser(info.lastInsertRowid, name, targetRole);
-        return { userId: info.lastInsertRowid, profile };
-      });
-      return tx();
+        .run(String(email).toLowerCase().trim(), name, passwordHash);
+      const userId = info.lastInsertRowid;
+      try {
+        const profile = await q.profile.createForUser(userId, name, targetRole);
+        return { userId, profile };
+      } catch (err) {
+        // compensating delete keeps sign-up atomic (no user without a profile)
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+        throw err;
+      }
     },
   },
   sessions: {
     create: (userId, token, expiresAt) =>
-      db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(token, userId, expiresAt),
+      Promise.resolve(
+        db.prepare("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(token, userId, expiresAt)
+      ),
     get: (token) =>
-      db
-        .prepare(
-          "SELECT s.token, s.expires_at, u.id AS user_id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?"
-        )
-        .get(token),
-    delete: (token) => db.prepare("DELETE FROM sessions WHERE token = ?").run(token),
-    purgeExpired: () => db.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run(),
+      Promise.resolve(
+        db
+          .prepare(
+            "SELECT s.token, s.expires_at, u.id AS user_id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?"
+          )
+          .get(token)
+      ),
+    delete: (token) => Promise.resolve(db.prepare("DELETE FROM sessions WHERE token = ?").run(token)),
+    purgeExpired: () => Promise.resolve(db.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run()),
   },
   profile: {
-    get: (id) => db.prepare("SELECT * FROM profiles WHERE id = ?").get(id),
+    get: (id) => Promise.resolve(db.prepare("SELECT * FROM profiles WHERE id = ?").get(id)),
     getByUserId: (userId) =>
-      db.prepare("SELECT * FROM profiles WHERE user_id = ? ORDER BY id LIMIT 1").get(userId),
+      Promise.resolve(
+        db.prepare("SELECT * FROM profiles WHERE user_id = ? ORDER BY id LIMIT 1").get(userId)
+      ),
     getDefault: () =>
-      db.prepare("SELECT * FROM profiles WHERE user_id IS NULL ORDER BY id LIMIT 1").get(),
+      Promise.resolve(
+        db.prepare("SELECT * FROM profiles WHERE user_id IS NULL ORDER BY id LIMIT 1").get()
+      ),
     createForUser: (userId, name, targetRole) => {
       const existing = db.prepare("SELECT id FROM profiles WHERE user_id = ?").get(userId);
-      if (existing) return db.prepare("SELECT * FROM profiles WHERE id = ?").get(existing.id);
+      if (existing) return Promise.resolve(db.prepare("SELECT * FROM profiles WHERE id = ?").get(existing.id));
       const info = db
         .prepare(
           "INSERT INTO profiles (user_id, name, role, target_role, readiness, next_best_skill) VALUES (?, ?, 'student', ?, 20, 'Docker')"
         )
         .run(userId, name, targetRole || "Full Stack Developer");
       const profileId = info.lastInsertRowid;
-      // starter Skill DNA — every new user begins with a baseline to grow from
       const insSkill = db.prepare(
         "INSERT INTO skills (profile_id, name, value, tone, note, sort_order) VALUES (?, ?, ?, ?, ?, ?)"
       );
@@ -329,7 +332,6 @@ export const q = {
       ].forEach(([sName, value, tone, note], i) =>
         insSkill.run(profileId, sName, value, tone, note, i)
       );
-      // seed the new user's roadmap with the standard sequence
       const insStep = db.prepare(
         "INSERT INTO roadmap_steps (id, profile_id, label, title, status, icon, sort_order) VALUES (?, ?, ?, ?, ?, NULL, ?)"
       );
@@ -342,74 +344,81 @@ export const q = {
       ].forEach(([id, label, title, status], i) =>
         insStep.run(id, profileId, label, title, status, i)
       );
-      return db.prepare("SELECT * FROM profiles WHERE id = ?").get(profileId);
+      return Promise.resolve(db.prepare("SELECT * FROM profiles WHERE id = ?").get(profileId));
     },
   },
   skills: {
     listByProfile: (profileId) =>
-      db
-        .prepare(
-          "SELECT name, value, tone, note FROM skills WHERE profile_id = ? ORDER BY sort_order"
-        )
-        .all(profileId),
+      Promise.resolve(
+        db
+          .prepare(
+            "SELECT name, value, tone, note FROM skills WHERE profile_id = ? ORDER BY sort_order"
+          )
+          .all(profileId)
+      ),
   },
   opportunities: {
     all: () =>
-      db
-        .prepare("SELECT id, title, company, location, match, tags, why FROM opportunities ORDER BY match DESC")
-        .all()
-        .map((o) => ({ ...o, tags: JSON.parse(o.tags) })),
+      Promise.resolve(
+        db
+          .prepare("SELECT id, title, company, location, match, tags, why FROM opportunities ORDER BY match DESC")
+          .all()
+          .map((o) => ({ ...o, tags: JSON.parse(o.tags) }))
+      ),
     saved: (profileId) =>
-      db
-        .prepare("SELECT opportunity_id, applied FROM saved_opportunities WHERE profile_id = ?")
-        .all(profileId),
+      Promise.resolve(
+        db
+          .prepare("SELECT opportunity_id, applied FROM saved_opportunities WHERE profile_id = ?")
+          .all(profileId)
+      ),
     toggleSave: (profileId, opportunityId) => {
       const existing = db
-        .prepare(
-          "SELECT 1 FROM saved_opportunities WHERE profile_id = ? AND opportunity_id = ?"
-        )
+        .prepare("SELECT 1 FROM saved_opportunities WHERE profile_id = ? AND opportunity_id = ?")
         .get(profileId, opportunityId);
       if (existing) {
         db.prepare(
           "DELETE FROM saved_opportunities WHERE profile_id = ? AND opportunity_id = ?"
         ).run(profileId, opportunityId);
-        return { saved: false };
+        return Promise.resolve({ saved: false });
       }
       db.prepare(
         "INSERT INTO saved_opportunities (profile_id, opportunity_id) VALUES (?, ?)"
       ).run(profileId, opportunityId);
-      return { saved: true };
+      return Promise.resolve({ saved: true });
     },
     setApplied: (profileId, opportunityId, applied) => {
       db.prepare(
         "INSERT INTO saved_opportunities (profile_id, opportunity_id, applied) VALUES (?, ?, ?) ON CONFLICT(profile_id, opportunity_id) DO UPDATE SET applied = excluded.applied"
       ).run(profileId, opportunityId, applied ? 1 : 0);
-      return { applied };
+      return Promise.resolve({ applied });
     },
   },
   roadmap: {
     listByProfile: (profileId) =>
-      db
-        .prepare(
-          "SELECT id, label, title, status, sort_order AS sortOrder FROM roadmap_steps WHERE profile_id = ? ORDER BY sort_order"
-        )
-        .all(profileId),
+      Promise.resolve(
+        db
+          .prepare(
+            "SELECT id, label, title, status, sort_order AS sortOrder FROM roadmap_steps WHERE profile_id = ? ORDER BY sort_order"
+          )
+          .all(profileId)
+      ),
     setComplete: (profileId, stepId, complete) => {
       const step = db
         .prepare("SELECT status FROM roadmap_steps WHERE id = ? AND profile_id = ?")
         .get(stepId, profileId);
-      if (!step) return null;
+      if (!step) return Promise.resolve(null);
       const isLocked = step.status === "complete";
       if (!isLocked) {
         db.prepare(
           "UPDATE roadmap_steps SET status = ? WHERE id = ? AND profile_id = ?"
         ).run(complete ? "complete" : "up next", stepId, profileId);
       }
-      return db
+      const done = db
         .prepare(
           "SELECT COUNT(*) AS done FROM roadmap_steps WHERE profile_id = ? AND status = 'complete'"
         )
         .get(profileId).done;
+      return Promise.resolve(done);
     },
   },
   assessments: {
@@ -418,7 +427,6 @@ export const q = {
         .prepare("SELECT * FROM assessments WHERE profile_id = ? ORDER BY id LIMIT 1")
         .get(profileId);
       if (!a) {
-        // fall back to (and copy from) the demo assessment so new users get a checkpoint too
         const demo = db
           .prepare(
             "SELECT a.* FROM assessments a JOIN profiles p ON p.id = a.profile_id WHERE p.user_id IS NULL ORDER BY a.id LIMIT 1"
@@ -433,42 +441,46 @@ export const q = {
             .get(profileId);
         }
       }
-      if (!a) return null;
-      return { ...a, options: JSON.parse(a.options) };
+      if (!a) return Promise.resolve(null);
+      return Promise.resolve({ ...a, options: JSON.parse(a.options) });
     },
     recordAttempt: (assessmentId, profileId, selectedIndex) => {
-      const a = db
-        .prepare("SELECT correct_index FROM assessments WHERE id = ?")
-        .get(assessmentId);
+      const a = db.prepare("SELECT correct_index FROM assessments WHERE id = ?").get(assessmentId);
       const correct = a && selectedIndex === a.correct_index;
       db.prepare(
         "INSERT INTO assessment_attempts (assessment_id, profile_id, selected_index, correct) VALUES (?, ?, ?, ?)"
       ).run(assessmentId, profileId, selectedIndex, correct ? 1 : 0);
-      return { correct };
+      return Promise.resolve({ correct });
     },
     attemptCount: (profileId) =>
-      db
-        .prepare("SELECT COUNT(*) AS n FROM assessment_attempts WHERE profile_id = ?")
-        .get(profileId).n,
+      Promise.resolve(
+        db.prepare("SELECT COUNT(*) AS n FROM assessment_attempts WHERE profile_id = ?").get(profileId).n
+      ),
   },
   chat: {
     history: (profileId, limit = 30) =>
-      db
-        .prepare(
-          "SELECT from_party AS 'from', text, created_at FROM chat_messages WHERE profile_id = ? ORDER BY id DESC LIMIT ?"
-        )
-        .all(profileId, limit)
-        .reverse(),
+      Promise.resolve(
+        db
+          .prepare(
+            "SELECT from_party AS 'from', text, created_at FROM chat_messages WHERE profile_id = ? ORDER BY id DESC LIMIT ?"
+          )
+          .all(profileId, limit)
+          .reverse()
+      ),
     add: (profileId, from, text) =>
-      db
-        .prepare("INSERT INTO chat_messages (profile_id, from_party, text) VALUES (?, ?, ?)")
-        .run(profileId, from, text),
+      Promise.resolve(
+        db.prepare("INSERT INTO chat_messages (profile_id, from_party, text) VALUES (?, ?, ?)").run(profileId, from, text)
+      ),
   },
   academia: {
     pulses: () =>
-      db.prepare("SELECT label, percent, detail FROM curriculum_pulses ORDER BY sort_order").all(),
+      Promise.resolve(
+        db.prepare("SELECT label, percent, detail FROM curriculum_pulses ORDER BY sort_order").all()
+      ),
     interventions: () =>
-      db.prepare("SELECT title, detail, action FROM interventions ORDER BY sort_order").all(),
+      Promise.resolve(
+        db.prepare("SELECT title, detail, action FROM interventions ORDER BY sort_order").all()
+      ),
   },
 };
 

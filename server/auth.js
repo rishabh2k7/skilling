@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { q } from "./db.js";
+import { qReady } from "./storage/index.js";
 
 const SESSION_DAYS = 30;
 const COOKIE_NAME = "skilling_session";
@@ -36,23 +36,28 @@ function clearSessionCookie(res) {
   res.setHeader("Set-Cookie", `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
 }
 
-export function sessionMiddleware(req, _res, next) {
-  q.sessions.purgeExpired();
-  const cookie = req.headers.cookie || "";
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([^;]+)`));
-  req.user = null;
-  if (match) {
-    const session = q.sessions.get(match[1]);
-    if (session) {
-      req.user = { id: session.user_id, email: session.email, name: session.name };
+export async function sessionMiddleware(req, _res, next) {
+  try {
+    const q = await qReady();
+    q.sessions.purgeExpired();
+    const cookie = req.headers.cookie || "";
+    const match = cookie.match(new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([^;]+)`));
+    req.user = null;
+    if (match) {
+      const session = await q.sessions.get(match[1]);
+      if (session) {
+        req.user = { id: session.user_id, email: session.email, name: session.name };
+      }
     }
+    next();
+  } catch (err) {
+    next(err);
   }
-  next();
 }
 
 export function authRoutes(app) {
   /* Register */
-  app.post("/api/auth/register", (req, res) => {
+  app.post("/api/auth/register", async (req, res) => {
     const { email, password, name, targetRole } = req.body || {};
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: "A valid email is required." });
@@ -63,11 +68,12 @@ export function authRoutes(app) {
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: "Your name is required." });
     }
-    if (q.users.byEmail(email)) {
+    const q = await qReady();
+    if (await q.users.byEmail(email)) {
       return res.status(409).json({ error: "An account with this email already exists." });
     }
 
-    const { userId, profile } = q.users.register(
+    const { userId, profile } = await q.users.register(
       String(email).toLowerCase().trim(),
       String(name).trim(),
       hashPassword(String(password)),
@@ -75,7 +81,7 @@ export function authRoutes(app) {
     );
 
     const token = newToken();
-    q.sessions.create(userId, token, expiryDate());
+    await q.sessions.create(userId, token, expiryDate());
     setSessionCookie(res, token);
 
     res.status(201).json({
@@ -85,30 +91,32 @@ export function authRoutes(app) {
   });
 
   /* Login */
-  app.post("/api/auth/login", (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required." });
     }
-    const user = q.users.byEmail(email);
+    const q = await qReady();
+    const user = await q.users.byEmail(email);
     if (!user || !verifyPassword(String(password), user.password_hash)) {
       return res.status(401).json({ error: "Incorrect email or password." });
     }
 
     const token = newToken();
-    q.sessions.create(user.id, token, expiryDate());
+    await q.sessions.create(user._id ?? user.id, token, expiryDate());
     setSessionCookie(res, token);
 
     res.json({
-      user: { id: user.id, email: user.email, name: user.name },
+      user: { id: user._id ?? user.id, email: user.email, name: user.name },
     });
   });
 
   /* Logout */
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", async (req, res) => {
+    const q = await qReady();
     const cookie = req.headers.cookie || "";
     const match = cookie.match(new RegExp(`(?:^|;\\s*)${COOKIE_NAME}=([^;]+)`));
-    if (match) q.sessions.delete(match[1]);
+    if (match) await q.sessions.delete(match[1]);
     clearSessionCookie(res);
     res.json({ ok: true });
   });

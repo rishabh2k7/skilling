@@ -32,22 +32,46 @@ sensitive ships to clients.
 | File | Purpose |
 | --- | --- |
 | `server/index.js` | Express app: profile, skills, opportunities, roadmap, assessments, AI chat, academia — serves `dist/` in production |
-| `server/db.js` | SQLite schema + seed data + query helpers (better-sqlite3) |
+| `server/storage/index.js` | Storage selector: MongoDB Atlas when `MONGODB_URI` is set, otherwise SQLite |
+| `server/storage/sqlite.js` | SQLite backend (better-sqlite3): schema, migrations, seed, query helpers |
+| `server/storage/mongo.js` | MongoDB Atlas backend: identical interface, indexes, TTL sessions, seed |
+| `server/auth.js` | Register / login / logout / session cookie handling |
 | `server/ai.js` | Provider layer + system prompt. Add new providers to the `PROVIDERS` array |
 
-## Data storage
+## Data storage — SQLite or MongoDB Atlas
 
-The backend uses **SQLite** (via `better-sqlite3`) — a single file at `data/skilling.db`.
+The backend has two interchangeable storage drivers behind one interface (`server/storage/`).
+Both expose the same async helpers, so the rest of the app never changes.
 
-- **Zero setup**: the database file is created and seeded with demo data on first boot.
+### Option A — MongoDB Atlas (cloud, recommended for production)
+
+1. Create a free cluster at [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas).
+2. **Database Access** → add a user (username + password).
+3. **Network Access** → add your server IP, or `0.0.0.0/0` for hosts like Render/Railway.
+4. **Connect → Drivers** → copy the connection string, then set it in `.env`:
+
+```bash
+MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority
+MONGODB_DB=skilling   # optional — defaults to the db name in the URI, or "skilling"
+```
+
+5. Restart the server. Demo data is seeded automatically on first connect; the DB upgrades
+   itself with indexes and a TTL index that purges expired sessions. Log out / log in state,
+   saved opportunities, roadmap progress, assessments, and chat history are all stored in Atlas.
+6. To deploy with Atlas: add `MONGODB_URI` in your host's **Environment** settings
+   (Render: Environment; Railway: Variables). No disk attachment is needed — data lives in Atlas.
+
+The app **fails fast at startup** if the URI is wrong or Atlas is unreachable, with a hint
+about checking the URI and Network Access.
+
+### Option B — SQLite (default, zero setup)
+
+- Local file at `data/skilling.db` (change folder with `DATA_DIR`); created and seeded on boot.
 - **Delete `data/skilling.db`** to reset to fresh demo state.
-- **Where data lives**: set `DATA_DIR` env var to change the folder. In Docker the app writes
-to `/app/data`; attach a volume there (Railway: already configured in `railway.json`; Render:
-attach a persistent disk at `/var/data` and set `DATA_DIR=/var/data`) so data survives redeploys.
-- **Tables**: `profiles`, `skills`, `opportunities`, `saved_opportunities`, `roadmap_steps`,
-`assessments`, `assessment_attempts`, `chat_messages`, `curriculum_pulses`, `interventions`.
-- Outgrowing SQLite? The queries are plain SQL via helpers in `server/db.js`, so migrating to
-Postgres later means swapping `better-sqlite3` for `pg` and keeping the same helper functions.
+- In Docker the app writes to `/app/data`; attach a volume there (Railway: configured in
+  `railway.json`; Render: attach a disk and set `DATA_DIR=/var/data`).
+
+`/api/health` reports which driver is active: `"storage":"mongodb-atlas"` or `"storage":"sqlite"`.
 
 ## API endpoints
 
@@ -88,6 +112,8 @@ src/
   data/skillingData.js  all demo content (skills, opportunities, candidates…)
 server/
   index.js            Express API
+  auth.js             register / login / sessions
+  storage/            SQLite + MongoDB Atlas drivers behind one interface
   ai.js               AI providers
 ```
 

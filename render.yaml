@@ -1,6 +1,10 @@
 # Render Blueprint — deploys with "New +" → "Blueprint" after connecting the repo.
 # Add your AI key in the Render dashboard after the first deploy
 # (Environment → OPENAI_API_KEY or GROQ_API_KEY etc.).
+#
+# Storage: set MONGODB_URI (Atlas connection string) in the dashboard to use
+# MongoDB Atlas — then no Render disk is needed and data persists in the cloud.
+# Without it the app falls back to SQLite in DATA_DIR (attach a disk to persist).
 
 services:
   - type: web
@@ -17,3 +21,5 @@ services:
       # OPENAI_API_KEY   / ANTHROPIC_API_KEY / GEMINI_API_KEY
       # GROQ_API_KEY     / OPENROUTER_API_KEY
       # AI_PROVIDER (optional, when several keys are set)
+      # MONGODB_URI=mongodb+srv://...   (switches storage to MongoDB Atlas)
+      # MONGODB_DB=skilling             (optional db name override)
