@@ -200,6 +200,8 @@ export async function init() {
           throw err;
         }
       },
+      rename: (id, name) =>
+        users.updateOne({ _id: id }, { $set: { name: String(name).trim() } }),
     },
 
     sessions: {
@@ -277,6 +279,16 @@ export async function init() {
         );
         return profiles.findOne({ _id: id });
       },
+      update: async (id, fields) => {
+        const set = {};
+        if (fields.name !== undefined) set.name = String(fields.name).trim();
+        if (fields.targetRole !== undefined) set.target_role = String(fields.targetRole).trim();
+        if (fields.readiness !== undefined)
+          set.readiness = Math.max(0, Math.min(100, Math.round(Number(fields.readiness))));
+        if (fields.nextBestSkill !== undefined) set.next_best_skill = fields.nextBestSkill;
+        if (Object.keys(set).length) await profiles.updateOne({ _id: id }, { $set: set });
+        return profiles.findOne({ _id: id });
+      },
     },
 
     skills: {
@@ -285,6 +297,22 @@ export async function init() {
           .find({ profileId }, { projection: { _id: 0, name: 1, value: 1, tone: 1, note: 1 } })
           .sort({ sort_order: 1 })
           .toArray(),
+      setMultiple: async (profileId, items) => {
+        const toneFor = (v) => (v >= 75 ? "strong" : v >= 45 ? "steady" : "gap");
+        for (const s of items) {
+          const v = Math.round(Number(s.value));
+          if (!Number.isFinite(v)) continue;
+          const clamped = Math.max(0, Math.min(100, v));
+          await skills.updateOne(
+            { profileId, name: s.name },
+            { $set: { value: clamped, tone: toneFor(clamped) } }
+          );
+        }
+        return skills
+          .find({ profileId }, { projection: { _id: 0, name: 1, value: 1, tone: 1, note: 1 } })
+          .sort({ sort_order: 1 })
+          .toArray();
+      },
     },
 
     opportunities: {

@@ -132,16 +132,18 @@ export function Button({
   className = "",
   testId,
   type = "button",
+  disabled,
 }) {
   return (
     <motion.button
       type={type}
       onClick={onClick}
-      whileHover={{ scale: 1.02, y: -2 }}
-      whileTap={{ scale: 0.97 }}
+      disabled={disabled}
+      whileHover={disabled ? undefined : { scale: 1.02, y: -2 }}
+      whileTap={disabled ? undefined : { scale: 0.97 }}
       transition={{ type: "spring", stiffness: 420, damping: 24 }}
       data-testid={testId}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold transition-all duration-200 ${BUTTON_VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold transition-all duration-200 ${BUTTON_VARIANTS[variant]} ${disabled ? "cursor-not-allowed opacity-50" : ""} ${className}`}
     >
       {children}
     </motion.button>

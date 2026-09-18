@@ -104,3 +104,26 @@ export function useSendChat() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["chat"] }),
   });
 }
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (fields) => api("/profile", { method: "PATCH", body: fields }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["auth"] }); // sidebar shows the user's name
+    },
+  });
+}
+
+export function useUpdateSkills() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (skills) => api("/skills", { method: "PATCH", body: { skills } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["profile"] });
+    },
+  });
+}

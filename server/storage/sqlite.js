@@ -283,6 +283,8 @@ export const q = {
         throw err;
       }
     },
+    rename: (id, name) =>
+      Promise.resolve(db.prepare("UPDATE users SET name = ? WHERE id = ?").run(String(name).trim(), id)),
   },
   sessions: {
     create: (userId, token, expiresAt) =>
@@ -346,6 +348,22 @@ export const q = {
       );
       return Promise.resolve(db.prepare("SELECT * FROM profiles WHERE id = ?").get(profileId));
     },
+    update: (id, fields) => {
+      const sets = [];
+      const vals = [];
+      const push = (col, v) => {
+        sets.push(`${col} = ?`);
+        vals.push(v);
+      };
+      if (fields.name !== undefined) push("name", String(fields.name).trim());
+      if (fields.targetRole !== undefined) push("target_role", String(fields.targetRole).trim());
+      if (fields.readiness !== undefined)
+        push("readiness", Math.max(0, Math.min(100, Math.round(Number(fields.readiness)))));
+      if (fields.nextBestSkill !== undefined) push("next_best_skill", fields.nextBestSkill);
+      if (sets.length)
+        db.prepare(`UPDATE profiles SET ${sets.join(", ")} WHERE id = ?`).run(...vals, id);
+      return Promise.resolve(db.prepare("SELECT * FROM profiles WHERE id = ?").get(id));
+    },
   },
   skills: {
     listByProfile: (profileId) =>
@@ -356,6 +374,28 @@ export const q = {
           )
           .all(profileId)
       ),
+    setMultiple: (profileId, skills) => {
+      const upd = db.prepare(
+        "UPDATE skills SET value = ?, tone = ? WHERE profile_id = ? AND name = ?"
+      );
+      const toneFor = (v) => (v >= 75 ? "strong" : v >= 45 ? "steady" : "gap");
+      const tx = db.transaction((items) => {
+        for (const s of items) {
+          const v = Math.round(Number(s.value));
+          if (!Number.isFinite(v)) continue;
+          const clamped = Math.max(0, Math.min(100, v));
+          upd.run(clamped, toneFor(clamped), profileId, s.name);
+        }
+      });
+      tx(skills);
+      return Promise.resolve(
+        db
+          .prepare(
+            "SELECT name, value, tone, note FROM skills WHERE profile_id = ? ORDER BY sort_order"
+          )
+          .all(profileId)
+      );
+    },
   },
   opportunities: {
     all: () =>

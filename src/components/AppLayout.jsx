@@ -23,7 +23,9 @@ import {
 } from "lucide-react";
 import { Brand, Badge } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+import { useProfile } from "@/lib/api";
 import AuthModal from "@/components/AuthModal";
+import ProfileModal from "@/components/ProfileModal";
 
 /* Role + theme context (shared with pages via useApp) */
 const AppContext = createContext(null);
@@ -81,7 +83,9 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState("login");
+  const [profileOpen, setProfileOpen] = useState(false);
   const { user, logout } = useAuth();
+  const { data: profileData } = useProfile();
   const nav = role === "student" ? STUDENT_NAV : ROLE_NAVS[role];
 
   const openAuth = (mode) => {
@@ -168,13 +172,20 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
         <div className="rounded-xl border border-white/10 bg-white/5 p-3">
           {user ? (
             <div className="flex items-center gap-2">
-              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[hsl(var(--accent))] text-xs font-bold text-[hsl(var(--primary))]" data-testid="user-avatar">
-                {initials}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-xs font-bold" data-testid="user-name">{user.name}</p>
-                <p className="truncate text-[10px] text-white/45">{user.email}</p>
-              </div>
+              <button
+                onClick={() => setProfileOpen(true)}
+                data-testid="button-open-profile"
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 text-left transition hover:bg-white/10"
+                title="Edit profile"
+              >
+                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[hsl(var(--accent))] text-xs font-bold text-[hsl(var(--primary))]" data-testid="user-avatar">
+                  {initials}
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-bold" data-testid="user-name">{user.name}</p>
+                  <p className="truncate text-[10px] text-white/45">{user.email}</p>
+                </div>
+              </button>
               <button
                 onClick={logout}
                 data-testid="button-logout"
@@ -212,6 +223,12 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
       </aside>
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} initialMode={authMode} />
+      <ProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        user={user}
+        targetRole={profileData?.role}
+      />
 
       {sidebarOpen && (
         <button

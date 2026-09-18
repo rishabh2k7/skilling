@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Lightbulb, Radar } from "lucide-react";
-import { Badge, PageHeader, PageTransition, Reveal, AnimatedNumber, ProgressBar, EASE } from "@/components/ui";
-import { useSkills } from "@/lib/api";
+import { Badge, Button, PageHeader, PageTransition, Reveal, AnimatedNumber, ProgressBar, EASE } from "@/components/ui";
+import { useSkills, useUpdateSkills } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 const SIGNAL_SOURCES = [
   ["Coursework", "React Foundations", "verified", 88],
@@ -13,37 +14,72 @@ const SIGNAL_SOURCES = [
 export default function SkillDNA({ navigate }) {
   const [view, setView] = useState("bars");
   const { data, isLoading } = useSkills();
+  const updateSkills = useUpdateSkills();
+  const { user } = useAuth();
 
   const skills = data?.skills ?? [];
   const readiness = data?.readiness ?? 64;
   const role = data?.role ?? "Full Stack Developer";
+  const canEdit = !!user;
+
+  /* draft values while editing */
+  const [draft, setDraft] = useState({});
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setDraft(Object.fromEntries(skills.map((s) => [s.name, s.value])));
+  }, [skills, editing]);
+
+  const startEdit = () => {
+    setDraft(Object.fromEntries(skills.map((s) => [s.name, s.value])));
+    setEditing(true);
+  };
+  const cancelEdit = () => setEditing(false);
+  const saveEdit = async () => {
+    try {
+      await updateSkills.mutateAsync(skills.map((s) => ({ name: s.name, value: draft[s.name] })));
+      setEditing(false);
+    } catch {
+      /* error surfaces below via mutation state */
+    }
+  };
 
   return (
     <PageTransition>
       <PageHeader
         eyebrow="Skill intelligence / 01"
         title="Your Skill DNA"
-        copy="A living view of the capabilities behind your Full Stack Developer goal. Scores come from the server."
+        copy={`A living view of the capabilities behind your ${role} goal. Scores come from the server.`}
         action={
-          <div className="flex rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1">
-            <button
-              onClick={() => setView("bars")}
-              data-testid="button-view-bars"
-              className={`rounded-md px-3 py-1.5 text-xs font-bold ${
-                view === "bars" ? "bg-[hsl(var(--primary))] text-white" : ""
-              }`}
-            >
-              Signals
-            </button>
-            <button
-              onClick={() => setView("matrix")}
-              data-testid="button-view-matrix"
-              className={`rounded-md px-3 py-1.5 text-xs font-bold ${
-                view === "matrix" ? "bg-[hsl(var(--primary))] text-white" : ""
-              }`}
-            >
-              Matrix
-            </button>
+          <div className="flex items-center gap-2">
+            {canEdit && !editing && (
+              <button
+                onClick={startEdit}
+                data-testid="button-edit-skills"
+                className="rounded-lg bg-[hsl(var(--accent))] px-3 py-2 text-xs font-bold text-[hsl(var(--accent-foreground))] transition hover:-translate-y-0.5"
+              >
+                Edit scores
+              </button>
+            )}
+            <div className="flex rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-1">
+              <button
+                onClick={() => setView("bars")}
+                data-testid="button-view-bars"
+                className={`rounded-md px-3 py-1.5 text-xs font-bold ${
+                  view === "bars" ? "bg-[hsl(var(--primary))] text-white" : ""
+                }`}
+              >
+                Signals
+              </button>
+              <button
+                onClick={() => setView("matrix")}
+                data-testid="button-view-matrix"
+                className={`rounded-md px-3 py-1.5 text-xs font-bold ${
+                  view === "matrix" ? "bg-[hsl(var(--primary))] text-white" : ""
+                }`}
+              >
+                Matrix
+              </button>
+            </div>
           </div>
         }
       />
@@ -62,7 +98,7 @@ export default function SkillDNA({ navigate }) {
 
           {isLoading ? (
             <p className="mt-8 text-sm text-[hsl(var(--muted-foreground))]">Loading signals…</p>
-          ) : view === "bars" ? (
+          ) : view === "bars" && !editing ? (
             <div className="mt-8 space-y-6">
               {skills.map((skill, i) => (
                 <motion.div
@@ -72,6 +108,7 @@ export default function SkillDNA({ navigate }) {
                   viewport={{ once: true }}
                   transition={{ delay: i * 0.08, duration: 0.4, ease: EASE }}
                   data-testid={`skill-row-${skill.name.toLowerCase().replace(".", "")}`}
+                  className="relative"
                 >
                   <div className="mb-2 flex items-center justify-between">
                     <div>
@@ -96,6 +133,48 @@ export default function SkillDNA({ navigate }) {
                   <ProgressBar value={skill.value} accent={skill.tone === "gap"} />
                 </motion.div>
               ))}
+            </div>
+          ) : view === "bars" && editing ? (
+            <div className="mt-8 space-y-6" data-testid="skills-editor">
+              {skills.map((skill) => (
+                <div key={skill.name}>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-sm font-bold">{skill.name}</span>
+                    <span className="font-mono text-sm font-bold" data-testid={`draft-value-${skill.name.toLowerCase().replace(".", "")}`}>
+                      {draft[skill.name] ?? skill.value}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={draft[skill.name] ?? skill.value}
+                    onChange={(e) =>
+                      setDraft((d) => ({ ...d, [skill.name]: Number(e.target.value) }))
+                    }
+                    data-testid={`slider-${skill.name.toLowerCase().replace(".", "")}`}
+                    className="w-full accent-[hsl(var(--accent))]"
+                    aria-label={`${skill.name} score`}
+                  />
+                </div>
+              ))}
+              {updateSkills.isError && (
+                <p className="rounded-lg bg-[hsl(var(--destructive))]/10 px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]">
+                  {updateSkills.error?.message || "Could not save."}
+                </p>
+              )}
+              <div className="flex gap-2 pt-2">
+                <Button onClick={saveEdit} disabled={updateSkills.isPending} testId="button-save-skills">
+                  {updateSkills.isPending ? "Saving…" : "Save scores"}
+                </Button>
+                <Button variant="outline" onClick={cancelEdit} testId="button-cancel-skills">
+                  Cancel
+                </Button>
+              </div>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                Saving recalculates your readiness (average of all skills) and your next best
+                skill (the lowest score) on the server.
+              </p>
             </div>
           ) : (
             <div className="mt-8 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -132,7 +211,7 @@ export default function SkillDNA({ navigate }) {
               <span className="font-mono text-[10px] uppercase tracking-wider">Explainable gap</span>
             </div>
             <h2 className="mt-4 font-display text-2xl font-bold">
-              Docker is your highest-leverage move.
+              {(data?.nextBestSkill ?? "Docker")} is your highest-leverage move.
             </h2>
             <p className="mt-3 text-sm leading-6 text-white/60">
               It unlocks the most adjacent opportunities while reinforcing your Node.js foundation. A

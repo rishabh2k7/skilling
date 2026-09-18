@@ -80,6 +80,67 @@ app.get("/api/skills", async (req, res) => {
   });
 });
 
+/* Edit the signed-in user's profile (name, target role). Guests cannot edit. */
+app.patch("/api/profile", async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: "Sign in to edit your profile." });
+  const q = await store();
+  const profile = await getProfile(req);
+  if (!profile) return res.status(404).json({ error: "no profile" });
+
+  const { name, targetRole } = req.body || {};
+  if (name !== undefined && !String(name).trim()) {
+    return res.status(400).json({ error: "Name cannot be empty." });
+  }
+  if (targetRole !== undefined && String(targetRole).trim().length > 80) {
+    return res.status(400).json({ error: "Target role is too long." });
+  }
+
+  if (name !== undefined && String(name).trim() !== req.user.name) {
+    await q.users.rename(req.user.id, String(name));
+  }
+  const updated = await q.profile.update(profile._id ?? profile.id, {
+    ...(name !== undefined ? { name } : {}),
+    ...(targetRole !== undefined ? { targetRole } : {}),
+  });
+
+  res.json({
+    ...updated,
+    isDemo: false,
+    user: { id: req.user.id, name: String(name ?? req.user.name).trim(), email: req.user.email },
+  });
+});
+
+/* Edit the signed-in user's skill scores. Readiness recomputes server-side:
+   average of all skills; next-best-skill = the lowest-scored skill. */
+app.patch("/api/skills", async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: "Sign in to edit your Skill DNA." });
+  const q = await store();
+  const profile = await getProfile(req);
+  if (!profile) return res.status(404).json({ error: "no profile" });
+
+  const items = Array.isArray(req.body?.skills) ? req.body.skills : [];
+  if (!items.length) return res.status(400).json({ error: "skills array required" });
+  if (items.some((s) => !s?.name || !Number.isFinite(Number(s.value)))) {
+    return res.status(400).json({ error: "Each skill needs a name and a numeric value." });
+  }
+
+  const skills = await q.skills.setMultiple(profile._id ?? profile.id, items);
+  const avg = Math.round(skills.reduce((a, s) => a + s.value, 0) / Math.max(1, skills.length));
+  const weakest = [...skills].sort((a, b) => a.value - b.value)[0];
+  const updated = await q.profile.update(profile._id ?? profile.id, {
+    readiness: avg,
+    nextBestSkill: weakest?.name ?? profile.next_best_skill,
+  });
+
+  res.json({
+    role: updated.target_role,
+    readiness: updated.readiness,
+    nextBestSkill: updated.next_best_skill,
+    isDemo: false,
+    skills,
+  });
+});
+
 /* ---------------- Opportunities ---------------- */
 
 app.get("/api/opportunities", async (req, res) => {
