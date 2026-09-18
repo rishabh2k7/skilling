@@ -61,6 +61,18 @@ MONGODB_DB=skilling   # optional — defaults to the db name in the URI, or "ski
 6. To deploy with Atlas: add `MONGODB_URI` in your host's **Environment** settings
    (Render: Environment; Railway: Variables). No disk attachment is needed — data lives in Atlas.
 
+Shortcut — one command (keeps your site safe if the connection fails):
+
+```bash
+node scripts/atlas.mjs on      # enable Atlas, verify, auto-revert to SQLite on failure
+node scripts/atlas.mjs off     # switch back to SQLite
+node scripts/atlas.mjs status  # what's active right now
+```
+
+Note: some campus/office/ISP networks block MongoDB's port (27017) — if `on` reports a TLS
+or timeout error, that's the network, not your credentials. A phone hotspot will connect,
+and production hosts (Render/Railway) are unaffected.
+
 The app **fails fast at startup** if the URI is wrong or Atlas is unreachable, with a hint
 about checking the URI and Network Access.
 
