@@ -8,7 +8,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { ROLE_LIBRARY, DEFAULT_ROLE, RESOURCES } from "../catalog.js";
+import { ROLE_LIBRARY, DEFAULT_ROLE, RESOURCES, buildRoadmapTasks, TASK_KINDS } from "../catalog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "..", "data");
@@ -86,6 +86,20 @@ CREATE TABLE IF NOT EXISTS roadmap_steps (
   PRIMARY KEY (id, profile_id)
 );
 
+CREATE TABLE IF NOT EXISTS roadmap_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL,              -- owning roadmap step: foundations | build | checkpoint | evidence
+  kind TEXT NOT NULL,                 -- resource | project | checkpoint | custom
+  title TEXT NOT NULL,
+  data TEXT NOT NULL DEFAULT '{}',    -- JSON payload (resourceId/url/detail/skill...)
+  estimate TEXT,
+  done INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS checkpoint_attempts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -114,6 +128,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_attempts_profile ON checkpoint_attempts(profile_id);
 CREATE INDEX IF NOT EXISTS idx_history_profile ON readiness_history(profile_id, id);
+CREATE INDEX IF NOT EXISTS idx_tasks_profile ON roadmap_tasks(profile_id, sort_order);
 `);
 
 /* ------------- Migrations from the demo-era schema ------------- */
@@ -208,15 +223,57 @@ function seedRoadmap(profileId, targetRole, gapSkill) {
   );
   const steps = [
     ["intent", "Career goal", targetRole, "complete"],
-    ["foundations", "Foundation", "Core skills for the role", "next"],
-    ["build", "Skill gap", `${gapSkill} project`, "up next"],
-    ["checkpoint", "Validate", `${gapSkill} checkpoint`, "up next"],
-    ["evidence", "Prove", "Ship it and add it to your profile", "up next"],
+    ["foundations", "Learn", "Study the role's core skills", "next"],
+    ["checkpoint", "Validate", "Pass graded checkpoints", "up next"],
+    ["build", "Build", "Ship a small real project", "up next"],
+    ["evidence", "Prove", "Link your work from your profile", "up next"],
   ];
   steps.forEach(([id, label, title, status], i) =>
     ins.run(id, profileId, label, title, status, i, status === "complete" ? new Date().toISOString() : null)
   );
+
+  /* Ordered default tasks carrying real data (resources/checkpoint/project) */
+  const spec = ROLE_LIBRARY[targetRole] ?? ROLE_LIBRARY[DEFAULT_ROLE];
+  const foundationSkill = [...spec].sort((a, b) => b[1] - a[1])[0][0]; // strongest = start here
+  const tasks = buildRoadmapTasks(targetRole, foundationSkill, gapSkill).map((t, i) => ({
+    ...t,
+    stepId: ["foundations", "foundations", "checkpoint", "build"][i] ?? "evidence",
+  }));
+  const insTask = db.prepare(
+    "INSERT INTO roadmap_tasks (profile_id, step_id, kind, title, data, estimate, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+  tasks.forEach((t, i) =>
+    insTask.run(profileId, t.stepId, t.kind, t.title, JSON.stringify(t.data ?? {}), t.estimate ?? null, (i + 1) * 10)
+  );
 }
+
+
+
+/* Older profiles (created before tasks existed) get the default plan once. */
+function backfillTasksForExistingProfiles() {
+  const missing = db
+    .prepare(
+      "SELECT p.id AS pid, p.target_role AS role, p.next_best_skill AS gap FROM profiles p LEFT JOIN roadmap_tasks t ON t.profile_id = p.id GROUP BY p.id HAVING COUNT(t.id) = 0"
+    )
+    .all();
+  if (!missing.length) return;
+  const insTask = db.prepare(
+    "INSERT INTO roadmap_tasks (profile_id, step_id, kind, title, data, estimate, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+  for (const p of missing) {
+    const spec = ROLE_LIBRARY[p.role] ?? ROLE_LIBRARY[DEFAULT_ROLE];
+    const foundationSkill = [...spec].sort((a, b) => b[1] - a[1])[0][0];
+    const tasks = buildRoadmapTasks(p.role ?? DEFAULT_ROLE, foundationSkill, p.gap).map((t, i) => ({
+      ...t,
+      stepId: ["foundations", "foundations", "checkpoint", "build"][i] ?? "evidence",
+    }));
+    tasks.forEach((t, i) =>
+      insTask.run(p.pid, t.stepId, t.kind, t.title, JSON.stringify(t.data ?? {}), t.estimate ?? null, (i + 1) * 10)
+    );
+  }
+  console.log("[db] backfilled roadmap tasks for " + missing.length + " profile(s)");
+}
+backfillTasksForExistingProfiles();
 
 function recordReadiness(profileId, readiness) {
   db.prepare("INSERT INTO readiness_history (profile_id, readiness) VALUES (?, ?)").run(
@@ -458,28 +515,118 @@ export const q = {
           )
           .all(profileId)
       ),
-    setComplete: (profileId, stepId, complete) => {
-      const step = db
-        .prepare("SELECT status FROM roadmap_steps WHERE id = ? AND profile_id = ?")
-        .get(stepId, profileId);
-      if (!step) return Promise.resolve(null);
-      const isLocked = step.status === "complete";
-      if (!isLocked) {
-        db.prepare(
-          "UPDATE roadmap_steps SET status = ?, completed_at = ? WHERE id = ? AND profile_id = ?"
-        ).run(
-          complete ? "complete" : "up next",
-          complete ? new Date().toISOString() : null,
-          stepId,
-          profileId
-        );
+    /* Ordered tasks for the whole roadmap, grouped client-side by step_id */
+    listTasks: (profileId) =>
+      Promise.resolve(
+        db
+          .prepare(
+            "SELECT id, step_id AS stepId, kind, title, data, estimate, done, sort_order AS sortOrder, completed_at AS completedAt FROM roadmap_tasks WHERE profile_id = ? ORDER BY sort_order"
+          )
+          .all(profileId)
+          .map((t) => ({ ...t, data: JSON.parse(t.data || "{}"), done: !!t.done }))
+      ),
+    /* Tasks are completed strictly in order: only the first incomplete task
+       may be toggled. Completing/uncompleting also syncs the owning step's
+       status and recomputes the step's 'next' pointer. */
+    setTaskDone: (profileId, taskId, done) => {
+      const tasks = db
+        .prepare("SELECT id, step_id, done FROM roadmap_tasks WHERE profile_id = ? ORDER BY sort_order")
+        .all(profileId);
+      const target = tasks.find((t) => t.id === Number(taskId));
+      if (!target) return { error: "unknown task" };
+      const firstOpen = tasks.find((t) => !t.done);
+      if (done && firstOpen && firstOpen.id !== target.id) {
+        return { error: "out_of_order", blockedBy: firstOpen.id };
       }
-      const done = db
-        .prepare(
-          "SELECT COUNT(*) AS done FROM roadmap_steps WHERE profile_id = ? AND status = 'complete'"
-        )
+      db.prepare(
+        "UPDATE roadmap_tasks SET done = ?, completed_at = ? WHERE id = ? AND profile_id = ?"
+      ).run(done ? 1 : 0, done ? new Date().toISOString() : null, target.id, profileId);
+
+      /* Sync owning step status: complete when all its tasks are done,
+         'next' if it is the first step with incomplete tasks, else 'up next'. */
+      const after = db
+        .prepare("SELECT step_id, done FROM roadmap_tasks WHERE profile_id = ? ORDER BY sort_order")
+        .all(profileId);
+      const stepIds = db
+        .prepare("SELECT id FROM roadmap_steps WHERE profile_id = ? AND id != 'intent' ORDER BY sort_order")
+        .all(profileId)
+        .map((r) => r.id);
+      const allDoneFor = (stepId) => {
+        const rows = after.filter((t) => t.step_id === stepId);
+        return rows.length > 0 && rows.every((t) => t.done);
+      };
+      let nextSet = false;
+      for (const sid of stepIds) {
+        const step = db.prepare("SELECT status FROM roadmap_steps WHERE id = ? AND profile_id = ?").get(sid, profileId);
+        if (!step || step.status === "complete") continue;
+        if (allDoneFor(sid)) {
+          db.prepare("UPDATE roadmap_steps SET status = 'complete', completed_at = ? WHERE id = ? AND profile_id = ?").run(
+            new Date().toISOString(), sid, profileId
+          );
+        } else if (!nextSet) {
+          db.prepare("UPDATE roadmap_steps SET status = 'next' WHERE id = ? AND profile_id = ?").run(sid, profileId);
+          nextSet = true;
+        } else {
+          db.prepare("UPDATE roadmap_steps SET status = 'up next' WHERE id = ? AND profile_id = ?").run(sid, profileId);
+        }
+      }
+
+      const doneCount = db
+        .prepare("SELECT COUNT(*) AS done FROM roadmap_tasks WHERE profile_id = ? AND done = 1")
         .get(profileId).done;
-      return Promise.resolve(done);
+      const totalCount = db
+        .prepare("SELECT COUNT(*) AS n FROM roadmap_tasks WHERE profile_id = ?")
+        .get(profileId).n;
+      return { done: doneCount, total: totalCount };
+    },
+    /* Add a custom task to the end of a step's task list */
+    addTask: (profileId, stepId, title, data, estimate) => {
+      const maxOrder = db
+        .prepare("SELECT COALESCE(MAX(sort_order), 0) AS m FROM roadmap_tasks WHERE profile_id = ?")
+        .get(profileId).m;
+      const info = db
+        .prepare(
+          "INSERT INTO roadmap_tasks (profile_id, step_id, kind, title, data, estimate, sort_order) VALUES (?, ?, 'custom', ?, ?, ?, ?)"
+        )
+        .run(profileId, stepId, String(title).trim(), JSON.stringify(data ?? {}), estimate ?? null, maxOrder + 10);
+      const t = db
+        .prepare(
+          "SELECT id, step_id AS stepId, kind, title, data, estimate, done, sort_order AS sortOrder, completed_at AS completedAt FROM roadmap_tasks WHERE id = ?"
+        )
+        .get(info.lastInsertRowid);
+      return { ...t, data: JSON.parse(t.data || "{}"), done: !!t.done };
+    },
+    deleteTask: (profileId, taskId) => {
+      const info = db
+        .prepare("DELETE FROM roadmap_tasks WHERE id = ? AND profile_id = ? AND kind = 'custom'")
+        .run(Number(taskId), profileId);
+      return { deleted: info.changes > 0 };
+    },
+    /* Tasks are the source of truth: recompute every step's status from its
+       tasks. Fixes states left over from the old direct-step toggle flow. */
+    reconcileSteps: (profileId) => {
+      const tasks = db
+        .prepare("SELECT step_id, done FROM roadmap_tasks WHERE profile_id = ?")
+        .all(profileId);
+      const stepIds = db
+        .prepare("SELECT id, status FROM roadmap_steps WHERE profile_id = ? AND id != 'intent' ORDER BY sort_order")
+        .all(profileId);
+      let nextSet = false;
+      for (const { id } of stepIds) {
+        const rows = tasks.filter((t) => t.step_id === id);
+        const allDone = rows.length > 0 && rows.every((t) => t.done);
+        if (allDone) {
+          db.prepare(
+            "UPDATE roadmap_steps SET status = 'complete', completed_at = COALESCE(completed_at, ?) WHERE id = ? AND profile_id = ?"
+          ).run(new Date().toISOString(), id, profileId);
+        } else if (!nextSet) {
+          db.prepare("UPDATE roadmap_steps SET status = 'next' WHERE id = ? AND profile_id = ?").run(id, profileId);
+          nextSet = true;
+        } else {
+          db.prepare("UPDATE roadmap_steps SET status = 'up next' WHERE id = ? AND profile_id = ?").run(id, profileId);
+        }
+      }
+      return Promise.resolve();
     },
   },
 

@@ -107,11 +107,30 @@ export function useSetResourceStatus() {
   });
 }
 
-export function useToggleRoadmapStep() {
+export function useToggleRoadmapTask() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ stepId, complete }) =>
-      api(`/roadmap/${stepId}`, { method: "POST", body: { complete } }),
+    mutationFn: ({ taskId, done }) =>
+      api(`/roadmap/tasks/${taskId}`, { method: "POST", body: { done } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["roadmap"] });
+    },
+  });
+}
+
+export function useAddRoadmapTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ title, stepId, detail, estimate }) =>
+      api("/roadmap/tasks", { method: "POST", body: { title, stepId, detail, estimate } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["roadmap"] }),
+  });
+}
+
+export function useDeleteRoadmapTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId) => api(`/roadmap/tasks/${taskId}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["roadmap"] }),
   });
 }

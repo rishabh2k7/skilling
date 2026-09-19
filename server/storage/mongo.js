@@ -6,7 +6,7 @@
      users, sessions, profiles, skills, saved_openings, resource_status,
      roadmap_steps, checkpoint_attempts, readiness_history, chat_messages, counters */
 import { MongoClient } from "mongodb";
-import { ROLE_LIBRARY, DEFAULT_ROLE, RESOURCES } from "../catalog.js";
+import { ROLE_LIBRARY, DEFAULT_ROLE, RESOURCES, buildRoadmapTasks } from "../catalog.js";
 
 const nowIso = () => new Date().toISOString();
 
@@ -25,6 +25,7 @@ export async function init() {
   const savedOpenings = dbo.collection("saved_openings");
   const resourceStatus = dbo.collection("resource_status");
   const roadmapSteps = dbo.collection("roadmap_steps");
+  const roadmapTasks = dbo.collection("roadmap_tasks");
   const checkpointAttempts = dbo.collection("checkpoint_attempts");
   const readinessHistory = dbo.collection("readiness_history");
   const chatMessages = dbo.collection("chat_messages");
@@ -46,6 +47,7 @@ export async function init() {
   await sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL: auto-purge
   await skills.createIndex({ profileId: 1, name: 1 }, { unique: true });
   await roadmapSteps.createIndex({ profileId: 1, id: 1 }, { unique: true });
+  await roadmapTasks.createIndex({ profileId: 1, sort_order: 1 });
   await savedOpenings.createIndex({ profileId: 1, slug: 1 }, { unique: true });
   await resourceStatus.createIndex({ profileId: 1, id: 1 }, { unique: true });
   await chatMessages.createIndex({ profileId: 1, _id: -1 });
@@ -100,10 +102,10 @@ export async function init() {
   async function seedRoadmap(profileId, targetRole, gapSkill) {
     const steps = [
       ["intent", "Career goal", targetRole, "complete"],
-      ["foundations", "Foundation", "Core skills for the role", "next"],
-      ["build", "Skill gap", `${gapSkill} project`, "up next"],
-      ["checkpoint", "Validate", `${gapSkill} checkpoint`, "up next"],
-      ["evidence", "Prove", "Ship it and add it to your profile", "up next"],
+      ["foundations", "Learn", "Study the role's core skills", "next"],
+      ["checkpoint", "Validate", "Pass graded checkpoints", "up next"],
+      ["build", "Build", "Ship a small real project", "up next"],
+      ["evidence", "Prove", "Link your work from your profile", "up next"],
     ];
     await roadmapSteps.insertMany(
       steps.map(([id, label, title, status], i) => ({
@@ -116,7 +118,54 @@ export async function init() {
         completed_at: status === "complete" ? nowIso() : null,
       }))
     );
+
+    /* Ordered default tasks carrying real data (resources/checkpoint/project) */
+    const spec = ROLE_LIBRARY[targetRole] ?? ROLE_LIBRARY[DEFAULT_ROLE];
+    const foundationSkill = [...spec].sort((a, b) => b[1] - a[1])[0][0]; // strongest = start here
+    await seedRoadmapTasksOnly(profileId, targetRole, foundationSkill, gapSkill);
   }
+
+  /* Seed ONLY tasks (used by seedRoadmap and by the backfill) */
+  async function seedRoadmapTasksOnly(profileId, targetRole, foundationSkill, gapSkill) {
+    const tasks = buildRoadmapTasks(targetRole ?? DEFAULT_ROLE, foundationSkill, gapSkill).map((t, i) => ({
+      ...t,
+      stepId: ["foundations", "foundations", "checkpoint", "build"][i] ?? "evidence",
+    }));
+    if (!tasks.length) return;
+    await Promise.all(
+      tasks.map(async (t, i) =>
+        roadmapTasks.insertOne({
+          _id: await nextId("roadmap_tasks"),
+          profileId,
+          stepId: t.stepId,
+          kind: t.kind,
+          title: t.title,
+          data: t.data ?? {},
+          estimate: t.estimate ?? null,
+          done: false,
+          sort_order: (i + 1) * 10,
+          completed_at: null,
+          created_at: nowIso(),
+        })
+      )
+    );
+  }
+
+  /* Backfill default tasks for profiles created before tasks existed */
+  async function backfillTasks() {
+    const withTasks = new Set((await roadmapTasks.distinct("profileId")).map(Number));
+    const allProfiles = await profiles
+      .find({}, { projection: { _id: 1, target_role: 1, next_best_skill: 1 } })
+      .toArray();
+    const missing = allProfiles.filter((p) => !withTasks.has(Number(p._id)));
+    for (const p of missing) {
+      const spec = ROLE_LIBRARY[p.target_role] ?? ROLE_LIBRARY[DEFAULT_ROLE];
+      const foundationSkill = [...spec].sort((a, b) => b[1] - a[1])[0][0];
+      await seedRoadmapTasksOnly(Number(p._id), p.target_role, foundationSkill, p.next_best_skill);
+    }
+    if (missing.length) console.log("[db] backfilled roadmap tasks for " + missing.length + " profile(s)");
+  }
+  await backfillTasks();
 
   const recordReadiness = (profileId, readiness) =>
     readinessHistory.insertOne({
@@ -320,21 +369,148 @@ export async function init() {
           .sort({ sort_order: 1 })
           .toArray()
           .then((rows) => rows.map((r) => ({ ...r, sortOrder: r.sort_order }))),
-      setComplete: async (profileId, stepId, complete) => {
-        const step = await roadmapSteps.findOne({ id: stepId, profileId });
-        if (!step) return null;
-        if (step.status !== "complete") {
-          await roadmapSteps.updateOne(
-            { id: stepId, profileId },
-            {
-              $set: {
-                status: complete ? "complete" : "up next",
-                completed_at: complete ? nowIso() : null,
-              },
-            }
-          );
+
+      listTasks: async (profileId) => {
+        const rows = await roadmapTasks
+          .find({ profileId }, { projection: { _id: 1, stepId: 1, kind: 1, title: 1, data: 1, estimate: 1, done: 1, sort_order: 1, completed_at: 1 } })
+          .sort({ sort_order: 1 })
+          .toArray();
+        return rows.map((r) => ({
+          id: r._id,
+          stepId: r.stepId,
+          kind: r.kind,
+          title: r.title,
+          data: r.data ?? {},
+          estimate: r.estimate,
+          done: !!r.done,
+          sortOrder: r.sort_order,
+          completedAt: r.completed_at,
+        }));
+      },
+
+      /* Strictly ordered completion: only the first incomplete task may be
+         checked. Syncs the owning steps' statuses afterwards. */
+      setTaskDone: async (profileId, taskId, done) => {
+        const tasks = await roadmapTasks
+          .find({ profileId })
+          .sort({ sort_order: 1 })
+          .toArray();
+        const target = tasks.find((t) => String(t._id) === String(taskId));
+        if (!target) return { error: "unknown task" };
+        const firstOpen = tasks.find((t) => !t.done);
+        if (done && firstOpen && String(firstOpen._id) !== String(target._id)) {
+          return { error: "out_of_order", blockedBy: firstOpen._id };
         }
-        return roadmapSteps.countDocuments({ profileId, status: "complete" });
+        await roadmapTasks.updateOne(
+          { _id: target._id, profileId },
+          { $set: { done: !!done, completed_at: done ? nowIso() : null } }
+        );
+
+        /* Sync owning step statuses: complete when all its tasks are done,
+           the first step with open tasks becomes 'next', the rest 'up next'. */
+        const after = await roadmapTasks
+          .find({ profileId }, { projection: { _id: 0, stepId: 1, done: 1 } })
+          .toArray();
+        const stepIds = (
+          await roadmapSteps
+            .find({ profileId, id: { $ne: "intent" } }, { projection: { _id: 0, id: 1 } })
+            .sort({ sort_order: 1 })
+            .toArray()
+        ).map((r) => r.id);
+        const allDoneFor = (stepId) => {
+          const rows = after.filter((t) => t.stepId === stepId);
+          return rows.length > 0 && rows.every((t) => t.done);
+        };
+        let nextSet = false;
+        for (const sid of stepIds) {
+          const step = await roadmapSteps.findOne({ id: sid, profileId }, { projection: { _id: 0, status: 1 } });
+          if (!step || step.status === "complete") continue;
+          if (allDoneFor(sid)) {
+            await roadmapSteps.updateOne(
+              { id: sid, profileId },
+              { $set: { status: "complete", completed_at: nowIso() } }
+            );
+          } else if (!nextSet) {
+            await roadmapSteps.updateOne({ id: sid, profileId }, { $set: { status: "next" } });
+            nextSet = true;
+          } else {
+            await roadmapSteps.updateOne({ id: sid, profileId }, { $set: { status: "up next" } });
+          }
+        }
+
+        const doneCount = await roadmapTasks.countDocuments({ profileId, done: true });
+        const totalCount = await roadmapTasks.countDocuments({ profileId });
+        return { done: doneCount, total: totalCount };
+      },
+
+      /* Add a custom task to the end of the ordered list */
+      addTask: async (profileId, stepId, title, data, estimate) => {
+        const max = await roadmapTasks
+          .find({ profileId }, { projection: { _id: 0, sort_order: 1 } })
+          .sort({ sort_order: -1 })
+          .limit(1)
+          .toArray();
+        const nextOrder = (max[0]?.sort_order ?? 0) + 10;
+        const _id = await nextId("roadmap_tasks");
+        await roadmapTasks.insertOne({
+          _id,
+          profileId,
+          stepId,
+          kind: "custom",
+          title: String(title).trim(),
+          data: data ?? {},
+          estimate: estimate ?? null,
+          done: false,
+          sort_order: nextOrder,
+          completed_at: null,
+          created_at: nowIso(),
+        });
+        return {
+          id: _id,
+          stepId,
+          kind: "custom",
+          title: String(title).trim(),
+          data: data ?? {},
+          estimate: estimate ?? null,
+          done: false,
+          sortOrder: nextOrder,
+          completedAt: null,
+        };
+      },
+
+      deleteTask: async (profileId, taskId) => {
+        const r = await roadmapTasks.deleteOne({ _id: Number(taskId), profileId, kind: "custom" });
+        return { deleted: r.deletedCount > 0 };
+      },
+
+      /* Tasks are the source of truth: recompute every step's status from its
+         tasks. Fixes states left over from the old direct-step toggle flow. */
+      reconcileSteps: async (profileId) => {
+        const tasks = await roadmapTasks
+          .find({ profileId }, { projection: { _id: 0, stepId: 1, done: 1 } })
+          .toArray();
+        const stepIds = (
+          await roadmapSteps
+            .find({ profileId, id: { $ne: "intent" } }, { projection: { _id: 0, id: 1 } })
+            .sort({ sort_order: 1 })
+            .toArray()
+        ).map((r) => r.id);
+        let nextSet = false;
+        for (const sid of stepIds) {
+          const rows = tasks.filter((t) => t.stepId === sid);
+          const allDone = rows.length > 0 && rows.every((t) => t.done);
+          if (allDone) {
+            await roadmapSteps.updateOne(
+              { id: sid, profileId },
+              { $set: { status: "complete" }, $setOnInsert: { completed_at: nowIso() } }
+            );
+          } else if (!nextSet) {
+            await roadmapSteps.updateOne({ id: sid, profileId }, { $set: { status: "next" } });
+            nextSet = true;
+          } else {
+            await roadmapSteps.updateOne({ id: sid, profileId }, { $set: { status: "up next" } });
+          }
+        }
       },
     },
 

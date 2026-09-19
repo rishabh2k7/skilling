@@ -385,3 +385,105 @@ export function pickCheckpointSkill(skills) {
   const ordered = [...skills].sort((a, b) => a.value - b.value);
   return ordered.find((s) => QUESTION_BANK[s.name])?.name ?? null;
 }
+
+/* ---------------- Ordered roadmap task templates ----------------
+   A roadmap is an ORDERED list of tasks. Each task carries optional real
+   data: a resource from the library, a checkpoint skill, or a custom
+   description the user types. Users check tasks off in order; the server
+   only allows completing the first incomplete task (strict sequence). */
+
+const byId = Object.fromEntries(RESOURCES.map((r) => [r.id, r]));
+
+export const TASK_KINDS = {
+  resource: "resource",     // linked to a real library resource
+  project: "project",       // a build task with a described deliverable
+  checkpoint: "checkpoint", // a graded checkpoint for a skill
+  custom: "custom",         // user-authored task
+};
+
+/* Resource picks per skill, in teaching order (first = primary). */
+const RESOURCE_ORDER = {
+  JavaScript: ["javascript-info", "freecodecamp", "ms-webdev"],
+  React: ["react-dev", "traversy-react", "odinproject"],
+  "CSS & HTML": ["mdn-learn", "ms-webdev"],
+  TypeScript: ["odinproject", "javascript-info"],
+  Testing: ["fullstackopen"],
+  "Node.js": ["nodejs-learn", "traversy-node", "fullstackopen"],
+  SQL: ["sqlbolt", "mode-sql", "mongodb-university"],
+  APIs: ["traversy-node", "nodejs-learn", "fullstackopen"],
+  Docker: ["nana-docker", "docker-started"],
+  AWS: ["aws-skillbuilder"],
+  Security: ["nodejs-learn", "aws-skillbuilder"],
+  "Git & GitHub": ["github-skills", "pro-git"],
+  "CI/CD": ["github-skills", "nana-docker"],
+  Linux: ["aws-skillbuilder"],
+  Networking: ["aws-skillbuilder"],
+  Python: ["automate-python", "cs50x", "kaggle-learn"],
+  "Data Analysis": ["kaggle-learn", "mode-sql"],
+  "Data Visualization": ["kaggle-learn"],
+  Statistics: ["kaggle-learn"],
+  Spreadsheets: ["kaggle-learn"],
+  "Machine Learning": ["google-ml", "kaggle-learn"],
+  "Math for ML": ["google-ml", "cs50x"],
+  "Product Discovery": ["freecodecamp"],
+  Communication: ["freecodecamp"],
+  "UX Design": ["mdn-learn"],
+  Roadmapping: ["freecodecamp"],
+};
+
+function resourceTask(id, sortKey) {
+  const r = byId[id];
+  if (!r) return null;
+  return {
+    kind: "resource",
+    title: `Study: ${r.title}`,
+    data: { resourceId: r.id, url: r.url, provider: r.provider, duration: r.duration },
+    estimate: r.duration,
+    sortKey,
+  };
+}
+
+function projectTask(gapSkill, targetRole, sortKey) {
+  return {
+    kind: "project",
+    title: `Build: a small ${gapSkill} project`,
+    data: {
+      detail: `Apply ${gapSkill} in something real and public — a repo, dashboard, or demo. Keep it small enough to finish this week; ship it and link it from your profile.`,
+      deliverable: "Public repo or live link added to your evidence",
+    },
+    estimate: "4–8 hours",
+    sortKey,
+  };
+}
+
+function checkpointTask(skill, sortKey) {
+  return {
+    kind: "checkpoint",
+    title: `Pass: the ${skill} checkpoint`,
+    data: { skill, detail: `Score at least 3/5 on the graded ${skill} checkpoint.` },
+    estimate: "10 min",
+    sortKey,
+  };
+}
+
+/* Build the default ordered task plan for a profile.
+   foundationSkill — the first skill the user should study (from their DNA)
+   gapSkill        — the current weakest skill (usually the same at signup) */
+export function buildRoadmapTasks(targetRole, foundationSkill, gapSkill) {
+  const picks = RESOURCE_ORDER[foundationSkill] ?? RESOURCE_ORDER["JavaScript"];
+  const tasks = [];
+
+  const t1 = resourceTask(picks[0], 10);
+  if (t1) tasks.push(t1);
+  if (picks[1] && picks[1] !== picks[0]) {
+    const t2 = resourceTask(picks[1], 20);
+    if (t2) tasks.push(t2);
+  }
+
+  const cpSkill = QUESTION_BANK[foundationSkill] ? foundationSkill : foundationSkill;
+  if (QUESTION_BANK[cpSkill]) tasks.push(checkpointTask(cpSkill, 30));
+
+  tasks.push(projectTask(gapSkill || foundationSkill, targetRole, 40));
+
+  return tasks;
+}

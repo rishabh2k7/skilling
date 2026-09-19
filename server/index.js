@@ -310,26 +310,89 @@ app.post("/api/resources/:id/status", async (req, res) => {
   res.json(result);
 });
 
-/* ---------------- Roadmap ---------------- */
+/* ---------------- Roadmap (ordered tasks) ---------------- */
 
 app.get("/api/roadmap", async (req, res) => {
   const profile = await requireProfile(req, res);
   if (!profile) return;
   const q = await store();
-  const steps = await q.roadmap.listByProfile(profile._id ?? profile.id);
-  const done = steps.filter((s) => s.status === "complete").length;
-  res.json({ steps, done, total: steps.length });
+  const profileId = profile._id ?? profile.id;
+  await q.roadmap.reconcileSteps(profileId); // tasks are the source of truth
+  const [steps, tasks] = await Promise.all([
+    q.roadmap.listByProfile(profileId),
+    q.roadmap.listTasks(profileId),
+  ]);
+  const done = tasks.filter((t) => t.done).length;
+  /* The single task the user may check off next (strict order) */
+  const nextTaskId = tasks.find((t) => !t.done)?.id ?? null;
+  res.json({ steps, tasks, done, total: tasks.length, nextTaskId });
 });
 
-app.post("/api/roadmap/:stepId", async (req, res) => {
+/* Check/uncheck a task. The server enforces order: only the first
+   incomplete task can be marked done. */
+app.post("/api/roadmap/tasks/:taskId", async (req, res) => {
   const profile = await requireProfile(req, res);
   if (!profile) return;
   const q = await store();
-  const complete = !!req.body?.complete;
-  const done = await q.roadmap.setComplete(profile._id ?? profile.id, req.params.stepId, complete);
-  if (done === null) return res.status(404).json({ error: "unknown step" });
-  const steps = await q.roadmap.listByProfile(profile._id ?? profile.id);
-  res.json({ steps, done, total: steps.length });
+  const profileId = profile._id ?? profile.id;
+  const done = !!req.body?.done;
+  const result = await q.roadmap.setTaskDone(profileId, req.params.taskId, done);
+  if (result.error === "unknown task") return res.status(404).json({ error: "Unknown task." });
+  if (result.error === "out_of_order") {
+    return res.status(409).json({
+      error: "Finish the current task first — the roadmap is ordered.",
+      code: "out_of_order",
+      blockedBy: result.blockedBy,
+    });
+  }
+  const [steps, tasks] = await Promise.all([
+    q.roadmap.listByProfile(profileId),
+    q.roadmap.listTasks(profileId),
+  ]);
+  res.json({
+    steps,
+    tasks,
+    done: tasks.filter((t) => t.done).length,
+    total: tasks.length,
+    nextTaskId: tasks.find((t) => !t.done)?.id ?? null,
+  });
+});
+
+/* Add a custom task (goes to the end of the ordered list) */
+app.post("/api/roadmap/tasks", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  const title = String(req.body?.title ?? "").trim();
+  if (!title) return res.status(400).json({ error: "A task title is required." });
+  if (title.length > 120) return res.status(400).json({ error: "Task title is too long." });
+  const stepId = String(req.body?.stepId ?? "build");
+  const allowed = ["foundations", "checkpoint", "build", "evidence"];
+  if (!allowed.includes(stepId)) {
+    return res.status(400).json({ error: "stepId must be one of " + allowed.join(", ") });
+  }
+  const detail = req.body?.detail ? String(req.body.detail).slice(0, 500) : undefined;
+  const estimate = req.body?.estimate ? String(req.body.estimate).slice(0, 40) : undefined;
+  const task = await q.roadmap.addTask(
+    profile._id ?? profile.id,
+    stepId,
+    title,
+    detail ? { detail } : {},
+    estimate
+  );
+  res.status(201).json(task);
+});
+
+/* Remove a custom task */
+app.delete("/api/roadmap/tasks/:taskId", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  const result = await q.roadmap.deleteTask(profile._id ?? profile.id, req.params.taskId);
+  if (!result.deleted) {
+    return res.status(404).json({ error: "Task not found (only custom tasks can be deleted)." });
+  }
+  res.json({ ok: true });
 });
 
 /* Readiness trail for the momentum chart (real recorded changes only) */
