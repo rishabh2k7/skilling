@@ -22,7 +22,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Brand, Badge } from "@/components/ui";
+import { Brand, Badge, EASE } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { useProfile, useAchievements } from "@/lib/api";
 import AuthModal from "@/components/AuthModal";
@@ -169,22 +169,11 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
           <p className="px-3 text-[10px] font-bold uppercase tracking-[.2em] text-white/35">More</p>
           <button
             onClick={() => {
-              navigate("/");
-              setSidebarOpen(false);
-            }}
-            data-testid="button-go-home"
-            className="mt-3 flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-semibold text-white/65 transition hover:bg-white/10 hover:text-white"
-          >
-            <Home size={17} />
-            Home screen
-          </button>
-          <button
-            onClick={() => {
               navigate("/help");
               setSidebarOpen(false);
             }}
             data-testid="nav-help"
-            className="mt-1 flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-semibold text-white/65 transition hover:bg-white/10 hover:text-white"
+            className="mt-3 flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm font-semibold text-white/65 transition hover:bg-white/10 hover:text-white"
           >
             <MessageCircle size={17} />
             Support desk
@@ -207,12 +196,48 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
                 className="flex min-w-0 flex-1 items-center gap-2 rounded-lg p-1 text-left transition hover:bg-white/10"
                 title="Edit profile"
               >
-                <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[hsl(var(--accent))] text-xs font-bold text-[hsl(var(--primary))]" data-testid="user-avatar">
-                  {initials}
+                <div className="relative grid h-11 w-11 shrink-0 place-items-center">
+                  {/* Level progress ring around the avatar */}
+                  {achievements?.level ? (
+                    <svg viewBox="0 0 44 44" className="absolute inset-0 h-full w-full -rotate-90">
+                      <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,.14)" strokeWidth="2.5" />
+                      <motion.circle
+                        cx="22" cy="22" r="20" fill="none"
+                        stroke={achievements.level.color}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeDasharray={2 * Math.PI * 20}
+                        animate={{
+                          strokeDashoffset:
+                            2 * Math.PI * 20 * (1 - (achievements.level.progress ?? 0) / 100),
+                        }}
+                        transition={{ duration: 0.8, ease: EASE }}
+                        style={{ filter: `drop-shadow(0 0 3px ${achievements.level.color}99)` }}
+                      />
+                    </svg>
+                  ) : null}
+                  <div
+                    className={`grid h-8 w-8 place-items-center rounded-lg bg-[hsl(var(--accent))] text-xs font-bold text-[hsl(var(--primary))] ${
+                      achievements?.level ? "rounded-full" : ""
+                    }`}
+                    data-testid="user-avatar"
+                  >
+                    {initials}
+                  </div>
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold" data-testid="user-name">{user.name}</p>
-                  <p className="truncate text-[10px] text-white/45">{user.email}</p>
+                  {achievements?.level ? (
+                    <p
+                      className="truncate text-[10px] font-bold"
+                      style={{ color: achievements.level.color }}
+                      data-testid="user-level-title"
+                    >
+                      Lv {achievements.level.level} · {achievements.level.title}
+                    </p>
+                  ) : (
+                    <p className="truncate text-[10px] text-white/45">{user.email}</p>
+                  )}
                 </div>
               </button>
               <button

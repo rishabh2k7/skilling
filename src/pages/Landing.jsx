@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, Compass, Lightbulb, Radar, Route, FileText, Sun, Moon } from "lucide-react";
+import { ArrowRight, Compass, Lightbulb, Radar, Route, FileText, Sun, Moon, Zap } from "lucide-react";
 import { Badge, Brand, Button, EASE, PageTransition, Reveal, AnimatedNumber } from "@/components/ui";
+import { MagneticDock } from "@/components/ui/magnetic-dock";
+import { useAuth } from "@/lib/auth";
+import { useAchievements } from "@/lib/api";
 
 /* Illustrative sample profile for the landing-page visual only —
    the live app reads each user's real Skill DNA from the API. */
@@ -35,6 +38,35 @@ const METHOD = [
   ["03", "Move with intent", "The next-best-skill engine turns a gap into a focused project or learning sprint.", Route],
   ["04", "Show your work", "Translate progress into proof recruiters and faculty can actually understand.", FileText],
 ];
+
+/* Signed-in mini-avatar shown in the dock: level ring + level number.
+   Rendered inside the dock's button, so this must NOT be a button itself. */
+function DockAvatar({ user, level }) {
+  const initials = user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+  const color = level?.color ?? "#a3e635";
+  return (
+    <div
+      data-testid="dock-avatar"
+      className="relative grid h-full w-full place-items-center rounded-full"
+      style={{ background: `${color}22`, boxShadow: `0 0 12px ${color}55` }}
+    >
+      <svg viewBox="0 0 36 36" className="absolute inset-0 h-full w-full -rotate-90">
+        <circle cx="18" cy="18" r="16" fill="none" stroke={color} strokeOpacity=".25" strokeWidth="2.5" />
+        <circle
+          cx="18" cy="18" r="16" fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray={2 * Math.PI * 16}
+          strokeDashoffset={2 * Math.PI * 16 * (1 - (level?.progress ?? 0) / 100)}
+        />
+      </svg>
+      <span className="text-[11px] font-black" style={{ color }}>
+        {level ? level.level : initials}
+      </span>
+    </div>
+  );
+}
 
 function SkillNetwork() {
   const [hovered, setHovered] = useState("");
@@ -107,6 +139,47 @@ function SkillNetwork() {
 }
 
 export default function Landing({ navigate, theme, toggleTheme }) {
+  const { user } = useAuth();
+  const { data: achievements } = useAchievements(!!user);
+
+  /* Magnetic dock items — the interactive starting-page navigation */
+  const dockItems = [
+    {
+      id: "method",
+      label: "How it works",
+      icon: <Compass className="h-full w-full" />,
+      onClick: () => document.getElementById("method")?.scrollIntoView({ behavior: "smooth" }),
+    },
+    {
+      id: "signals",
+      label: "Skill signals",
+      icon: <Radar className="h-full w-full" />,
+      onClick: () => document.getElementById("signals")?.scrollIntoView({ behavior: "smooth" }),
+    },
+    {
+      id: "theme",
+      label: "Switch theme",
+      icon: theme === "light" ? <Moon className="h-full w-full" /> : <Sun className="h-full w-full" />,
+      onClick: toggleTheme,
+    },
+    {
+      id: "open-app",
+      label: user ? "Open workspace" : "Start free",
+      icon: <ArrowRight className="h-full w-full" />,
+      onClick: () => navigate("/student"),
+    },
+    ...(user
+      ? [
+          {
+            id: "you",
+            label: `You — Level ${achievements?.level?.level ?? 1} · ${achievements?.level?.title ?? "First Step"}`,
+            icon: <DockAvatar user={user} level={achievements?.level} />,
+            onClick: () => navigate("/student/achievements"),
+          },
+        ]
+      : []),
+  ];
+
   return (
     <div className="min-h-[100dvh] overflow-hidden bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 lg:px-10">
@@ -321,10 +394,31 @@ export default function Landing({ navigate, theme, toggleTheme }) {
         </motion.section>
       </main>
 
-      <footer className="border-t border-white/10 bg-[hsl(var(--primary))] px-5 py-10 lg:px-10">
+      {/* Interactive magnetic dock — floating, follows the visitor down the page */}
+      <motion.div
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6, duration: 0.7, ease: EASE }}
+        className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2"
+        data-testid="landing-dock"
+      >
+        <MagneticDock
+          items={dockItems}
+          iconSize={52}
+          maxScale={1.6}
+          magneticDistance={140}
+          showLabels
+          variant="glass"
+        />
+      </motion.div>
+
+      <footer className="border-t border-white/10 bg-[hsl(var(--primary))] px-5 pb-24 pt-10 lg:px-10">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 text-sm text-[hsl(var(--primary-foreground))]/55 md:flex-row">
           <Brand light />
-          <span>Real skills. Real evidence. Built for clearer next steps.</span>
+          <span className="inline-flex items-center gap-1.5">
+            <Zap size={13} className="text-[hsl(var(--accent))]" />
+            Real skills. Real evidence. Built for clearer next steps.
+          </span>
         </div>
       </footer>
     </div>

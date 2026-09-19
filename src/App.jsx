@@ -67,7 +67,7 @@ function Routes() {
   else if (location === "/student/roadmap") page = <Roadmap user={user} />;
   else if (location === "/student/resources") page = <Resources user={user} />;
   else if (location === "/student/opportunities") page = <Opportunities user={user} />;
-  else if (location === "/student/achievements") page = <Achievements user={user} />;
+  else if (location === "/student/achievements") page = <Achievements user={user} navigate={go} />;
   else if (location === "/industry") page = <Industry navigate={go} user={user} />;
   else if (location === "/academia") page = <Academia navigate={go} user={user} />;
   else if (location === "/help") page = <Help user={user} />;

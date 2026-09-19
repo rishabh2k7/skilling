@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Link2, Lock, Sparkles, Trophy, Upload, Zap } from "lucide-react";
+import { BookOpen, Home, Link2, Lock, Radar, Sparkles, Trophy, Upload, Zap } from "lucide-react";
 import {
   Badge,
   Button,
@@ -11,6 +11,7 @@ import {
   EASE,
 } from "@/components/ui";
 import { PixelBadgeFrame, LockedBadge, XpBar, useGamify } from "@/components/Gamify";
+import { MagneticDock } from "@/components/ui/magnetic-dock";
 import { useAchievements, useProjects, useUploadProject } from "@/lib/api";
 import { openAuthModal } from "@/components/AuthGate";
 
@@ -28,7 +29,7 @@ const LEVELS = [
   { level: 10, xp: 3200, title: "Career Champion", color: "#e34fd0" },
 ];
 
-export default function Achievements({ user }) {
+export default function Achievements({ user, navigate }) {
   const { data, isLoading } = useAchievements(!!user);
   const { data: projectsData } = useProjects(!!user);
   const uploadProject = useUploadProject();
@@ -61,6 +62,37 @@ export default function Achievements({ user }) {
   const projects = projectsData?.projects ?? [];
   const recent = data?.recent ?? [];
 
+  /* Quick-action dock for this page */
+  const dockItems = [
+    {
+      id: "overview",
+      label: "Overview",
+      icon: <Home className="h-full w-full" />,
+      onClick: () => navigate("/student"),
+    },
+    {
+      id: "skills",
+      label: "Skill DNA",
+      icon: <Radar className="h-full w-full" />,
+      onClick: () => navigate("/student/skills"),
+    },
+    {
+      id: "resources",
+      label: "Earn XP in Resources",
+      icon: <BookOpen className="h-full w-full" />,
+      onClick: () => navigate("/student/resources"),
+    },
+    {
+      id: "upload",
+      label: "Ship a project (+100 XP)",
+      icon: <Upload className="h-full w-full" />,
+      onClick: () => {
+        setShowUpload(true);
+        document.getElementById("shipped-projects")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      },
+    },
+  ];
+
   return (
     <PageTransition>
       <PageHeader
@@ -81,29 +113,44 @@ export default function Achievements({ user }) {
             <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading your progress…</p>
           ) : (
             <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-              {/* Animated level ring */}
-              <div className="relative grid h-28 w-28 shrink-0 place-items-center">
-                <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-90">
-                  <circle cx="50" cy="50" r="44" fill="none" stroke="hsl(var(--border))" strokeWidth="7" />
-                  <motion.circle
-                    cx="50" cy="50" r="44" fill="none"
-                    stroke={level.color}
-                    strokeWidth="7"
-                    strokeLinecap="round"
-                    strokeDasharray={2 * Math.PI * 44}
-                    initial={{ strokeDashoffset: 2 * Math.PI * 44 }}
-                    animate={{ strokeDashoffset: 2 * Math.PI * 44 * (1 - level.progress / 100) }}
-                    transition={{ duration: 1.2, ease: EASE }}
-                    style={{ filter: `drop-shadow(0 0 6px ${level.color}88)` }}
-                    data-testid="level-ring"
-                  />
-                </svg>
-                <div className="text-center">
-                  <p className="text-[9px] font-black uppercase tracking-[.2em] text-[hsl(var(--muted-foreground))]">Level</p>
-                  <p className="font-display text-3xl font-black" style={{ color: level.color }} data-testid="level-number">
-                    {level.level}
-                  </p>
+              {/* Avatar with level ring + level & title right below it */}
+              <div className="flex shrink-0 flex-col items-center gap-2">
+                <div className="relative grid h-28 w-28 place-items-center">
+                  <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-90">
+                    <circle cx="50" cy="50" r="44" fill="none" stroke="hsl(var(--border))" strokeWidth="7" />
+                    <motion.circle
+                      cx="50" cy="50" r="44" fill="none"
+                      stroke={level.color}
+                      strokeWidth="7"
+                      strokeLinecap="round"
+                      strokeDasharray={2 * Math.PI * 44}
+                      initial={{ strokeDashoffset: 2 * Math.PI * 44 }}
+                      animate={{ strokeDashoffset: 2 * Math.PI * 44 * (1 - level.progress / 100) }}
+                      transition={{ duration: 1.2, ease: EASE }}
+                      style={{ filter: `drop-shadow(0 0 6px ${level.color}88)` }}
+                      data-testid="level-ring"
+                    />
+                  </svg>
+                  <div
+                    className="grid h-[74px] w-[74px] place-items-center rounded-full font-display text-2xl font-black"
+                    style={{
+                      background: `${level.color}1f`,
+                      color: level.color,
+                      boxShadow: `0 0 18px ${level.color}44, inset 0 0 12px ${level.color}22`,
+                    }}
+                    data-testid="avatar-level"
+                  >
+                    {user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
                 </div>
+                <p className="text-center" data-testid="avatar-level-title">
+                  <span
+                    className="rounded-full px-2.5 py-1 text-[11px] font-black"
+                    style={{ background: `${level.color}22`, color: level.color }}
+                  >
+                    Level {level.level} · {level.title}
+                  </span>
+                </p>
               </div>
 
               <div className="min-w-0 flex-1">
@@ -181,6 +228,7 @@ export default function Achievements({ user }) {
 
       {/* Projects */}
       <Reveal className="mx-auto mt-8 max-w-4xl" delay={0.1}>
+        <div id="shipped-projects" className="scroll-mt-24" />
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-display text-lg font-bold">Shipped projects</h3>
           <Button variant="outline" testId="button-show-upload" onClick={() => setShowUpload((s) => !s)}>
@@ -286,6 +334,17 @@ export default function Achievements({ user }) {
           </div>
         </Reveal>
       )}
+
+      {/* Quick-action magnetic dock */}
+      <motion.div
+        initial={{ opacity: 0, y: 40 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4, duration: 0.6, ease: EASE }}
+        className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2"
+        data-testid="achievements-dock"
+      >
+        <MagneticDock items={dockItems} iconSize={50} maxScale={1.55} magneticDistance={130} showLabels variant="glass" />
+      </motion.div>
     </PageTransition>
   );
 }
