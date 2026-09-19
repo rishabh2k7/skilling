@@ -31,6 +31,7 @@ import {
   useDeleteRoadmapTask,
 } from "@/lib/api";
 import { openAuthModal } from "@/components/AuthGate";
+import { useCelebrator } from "@/components/Gamify";
 
 const STEP_META = {
   intent: { icon: Target },
@@ -47,7 +48,11 @@ const KIND_BADGE = {
   custom: { label: "Your task", tone: "muted" },
 };
 
-function TaskRow({ task, isNext, anyPending, onToggle, onDelete }) {
+/* XP preview per task kind (mirrors server XP_RULES) — shown as a hint chip */
+const TASK_XP = { resource: 40, checkpoint: 50, project: 75, custom: 20 };
+const taskXpHint = (task) => TASK_XP[task?.kind] ?? TASK_XP.custom;
+
+function TaskRow({ task, isNext, anyPending, onToggle, onDelete, xpHint }) {
   const data = task.data ?? {};
   const badge = KIND_BADGE[task.kind] ?? KIND_BADGE.custom;
   const done = task.done;
@@ -102,6 +107,11 @@ function TaskRow({ task, isNext, anyPending, onToggle, onDelete }) {
           </span>
           <Badge tone={badge.tone}>{badge.label}</Badge>
           {isNext && !done && <Badge tone="accent">Up next</Badge>}
+          {!done && xpHint ? (
+            <span className="rounded-full bg-[hsl(var(--muted))] px-2 py-0.5 text-[10px] font-black text-[hsl(var(--secondary-foreground))]" title="XP you'll earn for finishing this task">
+              +{xpHint} XP
+            </span>
+          ) : null}
         </div>
 
         {/* Real data attached to the task */}
@@ -154,6 +164,7 @@ export default function Roadmap({ user }) {
   const toggleMutation = useToggleRoadmapTask();
   const addMutation = useAddRoadmapTask();
   const deleteMutation = useDeleteRoadmapTask();
+  const celebrate = useCelebrator();
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [notice, setNotice] = useState("");
@@ -181,6 +192,7 @@ export default function Roadmap({ user }) {
     toggleMutation.mutate(
       { taskId: task.id, done: nextDone },
       {
+        onSuccess: (res) => celebrate(res?.gamification),
         onError: (err) => {
           if (err.code === "out_of_order") setNotice(err.message);
           else setNotice(err.message);
@@ -337,6 +349,7 @@ export default function Roadmap({ user }) {
                             isNext={task.id === nextTaskId}
                             onToggle={onToggle}
                             onDelete={onDelete}
+                            xpHint={task.done ? null : taskXpHint(task)}
                           />
                         ))
                       )}

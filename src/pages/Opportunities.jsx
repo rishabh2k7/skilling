@@ -24,6 +24,7 @@ import {
   useProfile,
 } from "@/lib/api";
 import { openAuthModal } from "@/components/AuthGate";
+import { useCelebrator } from "@/components/Gamify";
 
 function linkedinShareUrl(op, readiness) {
   const text = `I'm building toward ${op.title}-level skills and just found this brief on Skilling — my Skill DNA match: ${op.match}%. Tracking my readiness (${readiness}/100) as I close the gap.`;
@@ -35,6 +36,7 @@ export default function Opportunities({ user }) {
   const { data: profile } = useProfile();
   const saveMutation = useSaveOpening();
   const applyMutation = useMarkApplied();
+  const celebrate = useCelebrator();
   const [query, setQuery] = useState("");
   const [savedOnly, setSavedOnly] = useState(false);
   const [appliedFlash, setAppliedFlash] = useState(null);
@@ -59,8 +61,13 @@ export default function Opportunities({ user }) {
       openAuthModal("register");
       return;
     }
-    /* Mark applied server-side, then open the real LinkedIn Jobs search */
-    if (!op.applied) applyMutation.mutate({ slug: op.slug, applied: true });
+    /* Mark applied server-side (earns XP + Opportunity Hunter badge), then open LinkedIn */
+    if (!op.applied) {
+      applyMutation.mutate(
+        { slug: op.slug, applied: true },
+        { onSuccess: (res) => celebrate(res?.gamification) }
+      );
+    }
     setAppliedFlash(op.slug);
     window.open(op.applyUrl, "_blank", "noopener,noreferrer");
   };

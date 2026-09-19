@@ -13,6 +13,13 @@ import {
   CHECKPOINT_SIZE,
   pickCheckpointSkill,
   ROLE_LIBRARY,
+  LEVELS,
+  BADGES,
+  levelForXp,
+  evaluateBadges,
+  xpForResource,
+  XP_RULES,
+  RESOURCE_DIFFICULTY,
 } from "./catalog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -67,6 +74,78 @@ async function recomputeProfile(q, profileId) {
     await q.readiness.record(profileId, updated.readiness);
   }
   return updated;
+}
+
+/* ---------------- Gamification engine (server-side XP + badges) ---------------- */
+
+/* Award XP for a real action, then evaluate badges. Returns the full gamification
+   payload: xp total, level before/after, badge changes — or null when the action
+   was already rewarded (idempotency). */
+async function awardXp(q, profile, action, ref, xp, label) {
+  if (!xp || xp <= 0) return null;
+  const profileId = profile._id ?? profile.id;
+  const beforeLevel = levelForXp(await q.gamification.xpTotal(profileId));
+  const result = await q.gamification.addXp(profileId, action, ref, xp, label);
+  if (!result) return null; // duplicate — already awarded
+
+  const afterLevel = levelForXp(result.xpTotal);
+  const stats = await q.gamification.stats(profileId, afterLevel.level);
+  const { badges, newly } = await q.gamification.syncBadges(
+    profileId,
+    evaluateBadges(stats)
+  );
+
+  return {
+    xp: result.awarded,
+    xpTotal: result.xpTotal,
+    leveledUp: afterLevel.level > beforeLevel.level,
+    levelBefore: beforeLevel.level,
+    level: afterLevel,
+    newBadges: newly.map((id) => BADGES.find((b) => b.id === id)).filter(Boolean),
+    badges,
+    stats,
+  };
+}
+
+/* Full gamification state for the signed-in user */
+async function gamificationState(q, profile) {
+  const profileId = profile._id ?? profile.id;
+  const xpTotal = await q.gamification.xpTotal(profileId);
+  const level = levelForXp(xpTotal);
+  const stats = await q.gamification.stats(profileId, level.level);
+  /* Badge list is kept in sync on read too, so milestones that depend on
+     readiness/level (recomputed elsewhere) still resolve. */
+  const { badges, newly } = await q.gamification.syncBadges(profileId, evaluateBadges(stats));
+  return {
+    xpTotal,
+    level,
+    levels: LEVELS,
+    badges: badges.map((b) => ({
+      ...b,
+      def: BADGES.find((d) => d.id === b.id) ?? null,
+    })),
+    allBadges: BADGES.map((b) => ({
+      id: b.id,
+      name: b.name,
+      icon: b.icon,
+      color: b.color,
+      description: b.description,
+      unlocked: badges.some((u) => u.id === b.id),
+    })),
+    recent: await q.gamification.recent(profileId, 25),
+    stats,
+    ...(newly.length ? { newlyUnlocked: newly } : {}),
+  };
+}
+
+/* XP for completing a roadmap task, by kind */
+function xpForTask(task) {
+  const kind = task?.kind ?? "custom";
+  if (kind === "resource" && task?.data?.resourceId) {
+    /* difficulty-weighted: a deep course pays 3× a starter lecture */
+    return Math.round((xpForResource(task.data.resourceId) ?? XP_RULES.TASK_DONE.resource) * 0.5);
+  }
+  return XP_RULES.TASK_DONE[kind] ?? XP_RULES.TASK_DONE.custom;
 }
 
 /* Score the role briefs against the user's Skill DNA (server-side — never fakeable) */
@@ -267,13 +346,27 @@ app.post("/api/openings/:slug/save", async (req, res) => {
   res.json(await q.openings.toggleSave(profile._id ?? profile.id, req.params.slug));
 });
 
-/* Marks "applied" — the apply click itself goes to LinkedIn in a new tab */
+/* Marks "applied" — the apply click itself goes to LinkedIn in a new tab.
+   First application earns the Opportunity Hunter badge + XP. */
 app.post("/api/openings/:slug/applied", async (req, res) => {
   const profile = await requireProfile(req, res);
   if (!profile) return;
   const q = await store();
   const applied = !!req.body?.applied;
-  res.json(await q.openings.setApplied(profile._id ?? profile.id, req.params.slug, applied));
+  const result = await q.openings.setApplied(profile._id ?? profile.id, req.params.slug, applied);
+  let gamification = null;
+  if (applied) {
+    const opening = OPENINGS.find((o) => o.slug === req.params.slug);
+    gamification = await awardXp(
+      q,
+      profile,
+      "application",
+      `application:${req.params.slug}`,
+      XP_RULES.APPLICATION_SENT,
+      `Applied: ${opening?.title ?? req.params.slug}`
+    );
+  }
+  res.json({ ...result, gamification });
 });
 
 /* ---------------- Learning resources ---------------- */
@@ -304,10 +397,21 @@ app.post("/api/resources/:id/status", async (req, res) => {
     return res.status(404).json({ error: "Unknown resource." });
   }
   const result = await q.resources.setStatus(profile._id ?? profile.id, req.params.id, status);
+  let gamification = null;
   if (status === "completed") {
     await recomputeProfile(q, profile._id ?? profile.id);
+    /* XP scales with the resource's difficulty tier (starter 40 / standard 80 / deep 150) */
+    const resource = RESOURCES.find((r) => r.id === req.params.id);
+    gamification = await awardXp(
+      q,
+      profile,
+      "resource",
+      `resource:${req.params.id}`,
+      xpForResource(req.params.id),
+      `Completed: ${resource?.title ?? req.params.id}`
+    );
   }
-  res.json(result);
+  res.json({ ...result, gamification });
 });
 
 /* ---------------- Roadmap (ordered tasks) ---------------- */
@@ -329,7 +433,7 @@ app.get("/api/roadmap", async (req, res) => {
 });
 
 /* Check/uncheck a task. The server enforces order: only the first
-   incomplete task can be marked done. */
+   incomplete task can be marked done. Completing a task awards XP. */
 app.post("/api/roadmap/tasks/:taskId", async (req, res) => {
   const profile = await requireProfile(req, res);
   if (!profile) return;
@@ -345,6 +449,26 @@ app.post("/api/roadmap/tasks/:taskId", async (req, res) => {
       blockedBy: result.blockedBy,
     });
   }
+
+  /* XP for completing a task (undo removes nothing — effort was still spent,
+     but each task can only ever be rewarded once) */
+  let gamification = null;
+  if (done) {
+    const task = result.task ?? (await q.roadmap.listTasks(profileId)).find(
+      (t) => String(t.id) === String(req.params.taskId)
+    );
+    const kind = task?.kind ?? "custom";
+    const title = task?.title ?? "Roadmap task";
+    gamification = await awardXp(
+      q,
+      profile,
+      "task",
+      `task:${req.params.taskId}`,
+      xpForTask(task),
+      `Task done: ${title}`
+    );
+  }
+
   const [steps, tasks] = await Promise.all([
     q.roadmap.listByProfile(profileId),
     q.roadmap.listTasks(profileId),
@@ -355,6 +479,7 @@ app.post("/api/roadmap/tasks/:taskId", async (req, res) => {
     done: tasks.filter((t) => t.done).length,
     total: tasks.length,
     nextTaskId: tasks.find((t) => !t.done)?.id ?? null,
+    gamification,
   });
 });
 
@@ -403,6 +528,74 @@ app.get("/api/readiness/history", async (req, res) => {
   res.json(await q.readiness.history(profile._id ?? profile.id, 14));
 });
 
+/* ---------------- Gamification API ---------------- */
+
+/* Full level/badge/XP state for the signed-in user */
+app.get("/api/achievements", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  res.json(await gamificationState(q, profile));
+});
+
+/* XP history (recent events) */
+app.get("/api/achievements/xp", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  res.json({
+    recent: await q.gamification.recent(profile._id ?? profile.id, 25),
+    xpTotal: await q.gamification.xpTotal(profile._id ?? profile.id),
+  });
+});
+
+/* Upload a project (title + link) → XP + Project Forge badge path */
+app.post("/api/projects", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  const title = String(req.body?.title ?? "").trim();
+  if (!title) return res.status(400).json({ error: "A project title is required." });
+  if (title.length > 120) return res.status(400).json({ error: "Title is too long." });
+  const url = req.body?.url ? String(req.body.url).trim() : null;
+  if (url && !/^https?:\/\/\S+$/i.test(url)) {
+    return res.status(400).json({ error: "Project link must be a full URL (https://…)." });
+  }
+  const description = req.body?.description ? String(req.body.description).trim().slice(0, 600) : null;
+  const skill = req.body?.skill ? String(req.body.skill).trim().slice(0, 60) : null;
+  const sharedLinkedin = !!req.body?.sharedLinkedin;
+
+  const project = await q.gamification.addProject(profile._id ?? profile.id, {
+    title,
+    skill,
+    url,
+    description,
+    sharedLinkedin,
+  });
+
+  /* XP: 100 for shipping, +25 if also shared on LinkedIn */
+  const xpEarned = XP_RULES.PROJECT_UPLOAD + (sharedLinkedin ? XP_RULES.PROJECT_LINKEDIN : 0);
+  const gamification = await awardXp(
+    q,
+    profile,
+    "project",
+    `project:${project.id}`,
+    xpEarned,
+    `Project shipped: ${title}`
+  );
+  await recomputeProfile(q, profile._id ?? profile.id);
+
+  res.status(201).json({ project, gamification });
+});
+
+/* List the signed-in user's uploaded projects */
+app.get("/api/projects", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  res.json({ projects: await q.gamification.listProjects(profile._id ?? profile.id) });
+});
+
 /* ---------------- Checkpoints (server-graded, moves Skill DNA) ---------------- */
 
 app.get("/api/checkpoints/next", async (req, res) => {
@@ -449,6 +642,18 @@ app.post("/api/checkpoints/:skill/submit", async (req, res) => {
   }
   const updated = await recomputeProfile(q, profileId);
 
+  /* XP: 12 per correct answer, +30 bonus for a perfect 5/5 run */
+  const xpEarned = correctCount * XP_RULES.CHECKPOINT_PASS +
+    (results.length > 0 && correctCount === results.length ? XP_RULES.CHECKPOINT_PERFECT : 0);
+  const gamification = await awardXp(
+    q,
+    profile,
+    "checkpoint",
+    null, // checkpoints are repeatable — each run earns XP
+    xpEarned,
+    `Checkpoint: ${req.params.skill} ${correctCount}/${results.length}`
+  );
+
   res.json({
     skill: req.params.skill,
     correct: correctCount,
@@ -458,6 +663,7 @@ app.post("/api/checkpoints/:skill/submit", async (req, res) => {
     readiness: updated.readiness,
     nextBestSkill: updated.next_best_skill,
     results,
+    gamification,
   });
 });
 

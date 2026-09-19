@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
+  Award,
   BookOpen,
   ChevronDown,
   Compass,
@@ -23,9 +24,10 @@ import {
 } from "lucide-react";
 import { Brand, Badge } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
-import { useProfile } from "@/lib/api";
+import { useProfile, useAchievements } from "@/lib/api";
 import AuthModal from "@/components/AuthModal";
 import ProfileModal from "@/components/ProfileModal";
+import { XpBar } from "@/components/Gamify";
 
 /* Role + theme context (shared with pages via useApp) */
 const AppContext = createContext(null);
@@ -38,6 +40,7 @@ export const STUDENT_NAV = [
   { label: "Resources", path: "/student/resources", icon: BookOpen },
   { label: "Opportunities", path: "/student/opportunities", icon: Trophy },
   { label: "Checkpoint", path: "/student/assessment", icon: Target },
+  { label: "Achievements", path: "/student/achievements", icon: Award },
 ];
 
 const ROLE_NAVS = {
@@ -87,6 +90,7 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const { user, logout } = useAuth();
   const { data: profileData } = useProfile();
+  const { data: achievements } = useAchievements(!!user && role === "student");
   const nav = role === "student" ? STUDENT_NAV : ROLE_NAVS[role];
 
   const openAuth = (mode) => {
@@ -186,6 +190,13 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
             Support desk
           </button>
         </div>
+
+        {/* Level + XP — animated, driven by real server XP */}
+        {user && role === "student" && achievements?.level && (
+          <div className="mb-3">
+            <XpBar level={achievements.level} xpTotal={achievements.xpTotal} />
+          </div>
+        )}
 
         <div className="rounded-xl border border-white/10 bg-white/5 p-3">
           {user ? (

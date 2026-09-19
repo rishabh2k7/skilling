@@ -10,11 +10,13 @@ import Assessment from "@/pages/Assessment";
 import Roadmap from "@/pages/Roadmap";
 import Resources from "@/pages/Resources";
 import Opportunities from "@/pages/Opportunities";
+import Achievements from "@/pages/Achievements";
 import Industry from "@/pages/Industry";
 import Academia from "@/pages/Academia";
 import Help from "@/pages/Help";
 import NotFound from "@/pages/NotFound";
 import { AppLayout, AppProvider, useApp } from "@/components/AppLayout";
+import { GamifyProvider } from "@/components/Gamify";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { PageTransition } from "@/components/ui";
 
@@ -65,6 +67,7 @@ function Routes() {
   else if (location === "/student/roadmap") page = <Roadmap user={user} />;
   else if (location === "/student/resources") page = <Resources user={user} />;
   else if (location === "/student/opportunities") page = <Opportunities user={user} />;
+  else if (location === "/student/achievements") page = <Achievements user={user} />;
   else if (location === "/industry") page = <Industry navigate={go} user={user} />;
   else if (location === "/academia") page = <Academia navigate={go} user={user} />;
   else if (location === "/help") page = <Help user={user} />;
@@ -78,11 +81,13 @@ function Routes() {
   return (
     <div className={theme === "dark" ? "dark" : ""}>
       <AppLayout navigate={go} role={role} theme={theme} toggleTheme={toggleTheme}>
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div key={location}>
-            <PageTransition>{page}</PageTransition>
-          </motion.div>
-        </AnimatePresence>
+        <GamifyProvider>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div key={location}>
+              <PageTransition>{page}</PageTransition>
+            </motion.div>
+          </AnimatePresence>
+        </GamifyProvider>
       </AppLayout>
     </div>
   );

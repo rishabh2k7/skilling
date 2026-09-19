@@ -8,6 +8,13 @@
 import { MongoClient } from "mongodb";
 import { ROLE_LIBRARY, DEFAULT_ROLE, RESOURCES, buildRoadmapTasks } from "../catalog.js";
 
+/* Starting values from the role library, used for the Skill Up badge stat */
+const ROLE_LIBRARY_STARTS = new Map(
+  Object.values(ROLE_LIBRARY)
+    .flat()
+    .map(([name, value]) => [name, value])
+);
+
 const nowIso = () => new Date().toISOString();
 
 export async function init() {
@@ -29,6 +36,9 @@ export async function init() {
   const checkpointAttempts = dbo.collection("checkpoint_attempts");
   const readinessHistory = dbo.collection("readiness_history");
   const chatMessages = dbo.collection("chat_messages");
+  const xpEvents = dbo.collection("xp_events");
+  const unlockedBadges = dbo.collection("unlocked_badges");
+  const projects = dbo.collection("projects");
   const counters = dbo.collection("counters");
 
   async function nextId(name) {
@@ -53,6 +63,10 @@ export async function init() {
   await chatMessages.createIndex({ profileId: 1, _id: -1 });
   await checkpointAttempts.createIndex({ profileId: 1 });
   await readinessHistory.createIndex({ profileId: 1, _id: -1 });
+  await xpEvents.createIndex({ profileId: 1, action: 1, ref: 1 });
+  await xpEvents.createIndex({ profileId: 1, _id: -1 });
+  await unlockedBadges.createIndex({ profileId: 1, badgeId: 1 }, { unique: true });
+  await projects.createIndex({ profileId: 1, _id: -1 });
 
   /* Legacy demo-era collections from older versions are removed. */
   for (const legacy of [
@@ -557,6 +571,145 @@ export async function init() {
           .map((r) => ({ readiness: r.readiness, recordedAt: r.recorded_at }));
       },
       record: recordReadiness,
+    },
+
+    /* ---------------- Gamification (XP, levels, badges, projects) ---------------- */
+    gamification: {
+      /* Record XP for an action; null when this action+ref was already rewarded */
+      addXp: async (profileId, action, ref, xp, label) => {
+        const doc = {
+          profileId,
+          action,
+          ref: ref ?? null,
+          xp,
+          label,
+          created_at: nowIso(),
+        };
+        if (ref !== null && ref !== undefined) {
+          const dup = await xpEvents.findOne({ profileId, action, ref: doc.ref });
+          if (dup) return null;
+        }
+        await xpEvents.insertOne(doc);
+        const total = await xpEvents
+          .aggregate([{ $match: { profileId } }, { $group: { _id: null, total: { $sum: "$xp" } } }])
+          .toArray();
+        return { xpTotal: total[0]?.total ?? xp, awarded: xp };
+      },
+      xpTotal: async (profileId) => {
+        const rows = await xpEvents
+          .aggregate([{ $match: { profileId } }, { $group: { _id: null, total: { $sum: "$xp" } } }])
+          .toArray();
+        return rows[0]?.total ?? 0;
+      },
+      recent: async (profileId, limit = 20) => {
+        const rows = await xpEvents
+          .find({ profileId }, { projection: { _id: 0, action: 1, ref: 1, xp: 1, label: 1, created_at: 1 } })
+          .sort({ _id: -1 })
+          .limit(limit)
+          .toArray();
+        return rows.map((r) => ({
+          action: r.action,
+          ref: r.ref,
+          xp: r.xp,
+          label: r.label,
+          createdAt: r.created_at,
+        }));
+      },
+      /* Aggregate the real stats badge checks run against */
+      stats: async (profileId, level) => {
+        const [skillRows, profile, completed, checkpoint, tasksDone, projectsN, applications] =
+          await Promise.all([
+            skills.find({ profileId }, { projection: { _id: 0, name: 1, value: 1 } }).toArray(),
+            profiles.findOne({ _id: profileId }, { projection: { _id: 0, readiness: 1 } }),
+            resourceStatus.countDocuments({ profileId, status: "completed" }),
+            checkpointAttempts
+              .aggregate([
+                { $match: { profileId } },
+                { $group: { _id: null, n: { $sum: 1 }, right: { $sum: "$correct" } } },
+              ])
+              .toArray(),
+            roadmapTasks.countDocuments({ profileId, done: true }),
+            projects.countDocuments({ profileId }),
+            savedOpenings.countDocuments({ profileId, applied: 1 }),
+          ]);
+        const maxGain = skillRows.reduce(
+          (max, s) => Math.max(max, s.value - (ROLE_LIBRARY_STARTS.get(s.name) ?? s.value)),
+          0
+        );
+        return {
+          xpTotal: await q.gamification.xpTotal(profileId),
+          level,
+          readiness: profile?.readiness ?? 0,
+          resourcesCompleted: completed,
+          checkpointCorrect: checkpoint[0]?.right ?? 0,
+          checkpointsTaken: checkpoint[0]?.n ?? 0,
+          tasksDone,
+          projectsUploaded: projectsN,
+          applicationsSent: applications,
+          maxSkillGain: maxGain,
+        };
+      },
+      /* Persist newly-earned badges; return full unlocked list + which are new */
+      syncBadges: async (profileId, earnedIds) => {
+        const newly = [];
+        for (const id of earnedIds) {
+          const r = await unlockedBadges.updateOne(
+            { profileId, badgeId: id },
+            { $setOnInsert: { profileId, badgeId: id, unlocked_at: nowIso() } },
+            { upsert: true }
+          );
+          if (r.upsertedCount > 0) newly.push(id);
+        }
+        const badges = await unlockedBadges
+          .find({ profileId }, { projection: { _id: 0, badgeId: 1, unlocked_at: 1 } })
+          .sort({ unlocked_at: 1 })
+          .toArray();
+        return { badges: badges.map((b) => ({ id: b.badgeId, unlockedAt: b.unlocked_at })), newly };
+      },
+      badges: async (profileId) => {
+        const rows = await unlockedBadges
+          .find({ profileId }, { projection: { _id: 0, badgeId: 1, unlocked_at: 1 } })
+          .sort({ unlocked_at: 1 })
+          .toArray();
+        return rows.map((b) => ({ id: b.badgeId, unlockedAt: b.unlocked_at }));
+      },
+      listProjects: async (profileId) => {
+        const rows = await projects
+          .find({ profileId }, { projection: { _id: 1, title: 1, skill: 1, url: 1, description: 1, shared_linkedin: 1, created_at: 1 } })
+          .sort({ _id: -1 })
+          .toArray();
+        return rows.map((r) => ({
+          id: r._id,
+          title: r.title,
+          skill: r.skill,
+          url: r.url,
+          description: r.description,
+          sharedLinkedin: !!r.shared_linkedin,
+          createdAt: r.created_at,
+        }));
+      },
+      addProject: async (profileId, { title, skill, url, description, sharedLinkedin }) => {
+        const _id = await nextId("projects");
+        await projects.insertOne({
+          _id,
+          profileId,
+          title: String(title).trim(),
+          skill: skill ?? null,
+          url: url ?? null,
+          description: description ?? null,
+          shared_linkedin: sharedLinkedin ? 1 : 0,
+          created_at: nowIso(),
+        });
+        return {
+          id: _id,
+          title: String(title).trim(),
+          skill: skill ?? null,
+          url: url ?? null,
+          description: description ?? null,
+          sharedLinkedin: !!sharedLinkedin,
+          createdAt: nowIso(),
+        };
+      },
     },
 
     chat: {

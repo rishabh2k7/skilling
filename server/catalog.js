@@ -236,6 +236,193 @@ export const RESOURCES = [
   },
 ];
 
+/* ---------------- XP, levels and badges ----------------
+   Experience is awarded server-side for real actions only. The user's XP
+   total, level, and unlocked badges are stored in the database — nothing is
+   fakeable from the browser.
+
+   Difficulty tiers drive XP:
+     starter    — short intros (XP 40)
+     standard   — full courses / medium tasks (XP 80)
+     deep       — long courses / books / big builds (XP 150) */
+
+export const XP_TIERS = {
+  starter: 40,
+  standard: 80,
+  deep: 150,
+};
+
+/* Per-action XP (difficulty-weighted where relevant) */
+export const XP_RULES = {
+  RESOURCE_COMPLETE: { starter: 40, standard: 80, deep: 150 },   // by resource difficulty
+  TASK_DONE: { resource: 30, checkpoint: 50, project: 120, custom: 20 },
+  CHECKPOINT_PASS: 12,       // per correct answer (in addition to skill bump)
+  CHECKPOINT_PERFECT: 30,    // bonus: 5/5
+  PROJECT_UPLOAD: 100,       // uploading a project link
+  PROJECT_LINKEDIN: 25,      // bonus: also shared on LinkedIn
+  APPLICATION_SENT: 35,      // applied to a role via LinkedIn
+  DAILY_STREAK: 10,          // reserved
+};
+
+/* Levels: XP thresholds and pixel-badge-style titles.
+   Each level also grants a colored "aura" used by the UI. */
+export const LEVELS = [
+  { level: 1,  xp: 0,    title: "First Step",        color: "#39d5f0" },
+  { level: 2,  xp: 100,  title: "Explorer",          color: "#39d5f0" },
+  { level: 3,  xp: 250,  title: "Skill Seeker",      color: "#e34fd0" },
+  { level: 4,  xp: 450,  title: "Builder",           color: "#e34fd0" },
+  { level: 5,  xp: 700,  title: "Knowledge Core",    color: "#a3e635" },
+  { level: 6,  xp: 1000, title: "Craftsperson",      color: "#a3e635" },
+  { level: 7,  xp: 1400, title: "Specialist",        color: "#f59e0b" },
+  { level: 8,  xp: 1900, title: "Expert",            color: "#f59e0b" },
+  { level: 9,  xp: 2500, title: "Career Ready",      color: "#39d5f0" },
+  { level: 10, xp: 3200, title: "Career Champion",   color: "#e34fd0" },
+];
+
+export function levelForXp(xp) {
+  let current = LEVELS[0];
+  let next = null;
+  for (let i = 0; i < LEVELS.length; i++) {
+    if (xp >= LEVELS[i].xp) {
+      current = LEVELS[i];
+      next = LEVELS[i + 1] ?? null;
+    }
+  }
+  const span = next ? next.xp - current.xp : 1;
+  const into = xp - current.xp;
+  return {
+    level: current.level,
+    title: current.title,
+    color: current.color,
+    xpIntoLevel: into,
+    xpForNext: next ? next.xp - current.xp : null,
+    xpToNext: next ? Math.max(0, next.xp - xp) : 0,
+    nextTitle: next?.title ?? null,
+    progress: next ? Math.min(100, Math.round((into / span) * 100)) : 100,
+  };
+}
+
+/* Difficulty per resource id — drives RESOURCE_COMPLETE XP.
+   Defaults to "standard" for unlisted ids. */
+export const RESOURCE_DIFFICULTY = {
+  "traversy-react": "starter",
+  "traversy-node": "starter",
+  "sqlbolt": "starter",
+  "github-skills": "starter",
+  "docker-started": "starter",
+  "javascript-info": "standard",
+  "react-dev": "standard",
+  "mdn-learn": "standard",
+  "ms-webdev": "standard",
+  "nodejs-learn": "standard",
+  "kaggle-learn": "standard",
+  "google-ml": "standard",
+  "mode-sql": "standard",
+  "mongodb-university": "standard",
+  "fullstackopen": "deep",
+  "cs50x": "deep",
+  "freecodecamp": "deep",
+  "odinproject": "deep",
+  "automate-python": "deep",
+  "pro-git": "deep",
+  "aws-skillbuilder": "standard",
+};
+
+export function xpForResource(resourceId) {
+  const tier = RESOURCE_DIFFICULTY[resourceId] ?? "standard";
+  return XP_RULES.RESOURCE_COMPLETE[tier];
+}
+
+/* Achievement badges — unlocked by real milestones. `icon` keys map to the
+   pixel-art badge set (see src/components/Gamify.jsx for the visuals). */
+export const BADGES = [
+  {
+    id: "first_step",
+    name: "First Step",
+    icon: "boot",
+    color: "#39d5f0",
+    description: "Earn your first XP",
+    check: (s) => s.xpTotal >= 1,
+  },
+  {
+    id: "skill_seeker",
+    name: "Skill Seeker",
+    icon: "magnifier",
+    color: "#e34fd0",
+    description: "Complete 3 real resources",
+    check: (s) => s.resourcesCompleted >= 3,
+  },
+  {
+    id: "knowledge_core",
+    name: "Knowledge Core",
+    icon: "brain",
+    color: "#a3e635",
+    description: "Complete 6 real resources",
+    check: (s) => s.resourcesCompleted >= 6,
+  },
+  {
+    id: "quiz_master",
+    name: "Quiz Master",
+    icon: "trophy",
+    color: "#f59e0b",
+    description: "Answer 10 checkpoint questions correctly",
+    check: (s) => s.checkpointCorrect >= 10,
+  },
+  {
+    id: "skill_builder",
+    name: "Skill Builder",
+    icon: "hammer",
+    color: "#39d5f0",
+    description: "Complete 3 roadmap tasks",
+    check: (s) => s.tasksDone >= 3,
+  },
+  {
+    id: "project_forge",
+    name: "Project Forge",
+    icon: "anvil",
+    color: "#e34fd0",
+    description: "Upload your first project",
+    check: (s) => s.projectsUploaded >= 1,
+  },
+  {
+    id: "skill_up",
+    name: "Skill Up",
+    icon: "arrow",
+    color: "#a3e635",
+    description: "Raise any skill score by 20 points",
+    check: (s) => s.maxSkillGain >= 20,
+  },
+  {
+    id: "career_ready",
+    name: "Career Ready",
+    icon: "shield",
+    color: "#f59e0b",
+    description: "Reach 60 readiness",
+    check: (s) => s.readiness >= 60,
+  },
+  {
+    id: "opportunity_hunter",
+    name: "Opportunity Hunter",
+    icon: "telescope",
+    color: "#39d5f0",
+    description: "Apply to a role on LinkedIn",
+    check: (s) => s.applicationsSent >= 1,
+  },
+  {
+    id: "career_champion",
+    name: "Career Champion",
+    icon: "crown",
+    color: "#e34fd0",
+    description: "Reach level 8",
+    check: (s) => s.level >= 8,
+  },
+];
+
+/* Evaluate which badges a user's current stats unlock. */
+export function evaluateBadges(stats) {
+  return BADGES.filter((b) => b.check(stats)).map((b) => b.id);
+}
+
 /* ---------------- Checkpoint question bank ----------------
    Server-graded. Passing questions bumps the matching skill score for real. */
 

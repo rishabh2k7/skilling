@@ -21,6 +21,7 @@ import {
   EASE,
 } from "@/components/ui";
 import { useResources, useSetResourceStatus } from "@/lib/api";
+import { useCelebrator } from "@/components/Gamify";
 import { openAuthModal } from "@/components/AuthGate";
 
 const KIND_META = {
@@ -131,6 +132,7 @@ function ResourceCard({ resource, status, onStatus, busy, index }) {
 export default function Resources({ user }) {
   const { data, isLoading } = useResources();
   const setStatus = useSetResourceStatus();
+  const celebrate = useCelebrator();
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("All");
   const [mine, setMine] = useState(false);
@@ -157,7 +159,7 @@ export default function Resources({ user }) {
 
   const onStatus = (id, status) => {
     if (!user) return openAuthModal("register");
-    setStatus.mutate({ id, status });
+    setStatus.mutate({ id, status }, { onSuccess: (res) => celebrate(res?.gamification) });
   };
 
   return (

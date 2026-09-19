@@ -14,11 +14,13 @@ import {
   useCheckpointStats,
 } from "@/lib/api";
 import AuthGate from "@/components/AuthGate";
+import { useCelebrator } from "@/components/Gamify";
 
 export default function Assessment({ user }) {
   const { data: checkpoint, isLoading, error, refetch } = useNextCheckpoint();
   const { data: stats } = useCheckpointStats();
   const submitMutation = useSubmitCheckpoint();
+  const celebrate = useCelebrator();
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState(null);
 
@@ -50,7 +52,12 @@ export default function Assessment({ user }) {
         skill: checkpoint.skill,
         answers: questions.map((q) => ({ id: q.id, selectedIndex: answers[q.id] })),
       },
-      { onSuccess: (data) => setResult(data) }
+      {
+        onSuccess: (data) => {
+          setResult(data);
+          celebrate(data?.gamification);
+        },
+      }
     );
   };
 
@@ -110,6 +117,12 @@ export default function Assessment({ user }) {
                 {result.score}% · {result.bump > 0 ? `+${result.bump} points added to ${result.skill}` : "No points added this time"} ·
                 readiness now {result.readiness}/100
               </p>
+              {result.gamification?.xp ? (
+                <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-black text-[hsl(var(--accent))]" data-testid="checkpoint-xp">
+                  <Zap size={12} /> +{result.gamification.xp} XP earned
+                  {result.gamification.leveledUp ? " · LEVEL UP!" : ""}
+                </p>
+              ) : null}
               <Button onClick={reset} variant="accent" className="mt-6" testId="button-next-checkpoint">
                 <RotateCcw size={15} /> Next checkpoint
               </Button>

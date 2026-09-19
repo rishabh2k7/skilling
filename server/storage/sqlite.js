@@ -125,10 +125,40 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS xp_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,               -- resource | task | checkpoint | project | application
+  ref TEXT,                           -- resource id / task id / slug / etc.
+  xp INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS unlocked_badges (
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  badge_id TEXT NOT NULL,
+  unlocked_at TEXT NOT NULL,
+  PRIMARY KEY (profile_id, badge_id)
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  skill TEXT,
+  url TEXT,
+  description TEXT,
+  shared_linkedin INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_attempts_profile ON checkpoint_attempts(profile_id);
 CREATE INDEX IF NOT EXISTS idx_history_profile ON readiness_history(profile_id, id);
 CREATE INDEX IF NOT EXISTS idx_tasks_profile ON roadmap_tasks(profile_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_xp_profile ON xp_events(profile_id, id);
+CREATE INDEX IF NOT EXISTS idx_projects_profile ON projects(profile_id, id);
 `);
 
 /* ------------- Migrations from the demo-era schema ------------- */
@@ -282,7 +312,90 @@ function recordReadiness(profileId, readiness) {
   );
 }
 
-/* ---------------- Interface (async signatures for store parity) ---------------- */
+/* ---------------- Gamification helpers (SQLite) ---------------- */
+
+/* Append an XP event and return the new totals. Idempotent per (profile, action, ref). */
+function addXpEvent(profileId, action, ref, xp, label) {
+  if (ref !== null && ref !== undefined) {
+    const dup = db
+      .prepare("SELECT 1 FROM xp_events WHERE profile_id = ? AND action = ? AND ref = ?")
+      .get(profileId, action, String(ref));
+    if (dup) return null; // already awarded for this exact action+target
+  }
+  db.prepare(
+    "INSERT INTO xp_events (profile_id, action, ref, xp, label) VALUES (?, ?, ?, ?, ?)"
+  ).run(profileId, action, ref === undefined ? null : ref, xp, label);
+  const total = db
+    .prepare("SELECT COALESCE(SUM(xp), 0) AS total FROM xp_events WHERE profile_id = ?")
+    .get(profileId).total;
+  return { xpTotal: total, awarded: xp };
+}
+
+function xpTotalFor(profileId) {
+  return db
+    .prepare("SELECT COALESCE(SUM(xp), 0) AS total FROM xp_events WHERE profile_id = ?")
+    .get(profileId).total;
+}
+
+function recentXpEvents(profileId, limit = 20) {
+  return db
+    .prepare(
+      "SELECT id, action, ref, xp, label, created_at AS createdAt FROM xp_events WHERE profile_id = ? ORDER BY id DESC LIMIT ?"
+    )
+    .all(profileId, limit);
+}
+
+/* Aggregate the real stats badge checks run against */
+function gamificationStats(profileId, level) {
+  const skills = db
+    .prepare("SELECT name, value FROM skills WHERE profile_id = ?")
+    .all(profileId);
+  const profile = db.prepare("SELECT readiness FROM profiles WHERE id = ?").get(profileId);
+  const completed = db
+    .prepare("SELECT COUNT(*) AS n FROM resource_status WHERE profile_id = ? AND status = 'completed'")
+    .get(profileId).n;
+  const checkpoint = db
+    .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(correct), 0) AS right FROM checkpoint_attempts WHERE profile_id = ?")
+    .get(profileId);
+  const tasksDone = db
+    .prepare("SELECT COUNT(*) AS n FROM roadmap_tasks WHERE profile_id = ? AND done = 1")
+    .get(profileId).n;
+  const projects = db
+    .prepare("SELECT COUNT(*) AS n FROM projects WHERE profile_id = ?")
+    .get(profileId).n;
+  const applications = db
+    .prepare("SELECT COUNT(*) AS n FROM saved_openings WHERE profile_id = ? AND applied = 1")
+    .get(profileId).n;
+  /* Skill Up: biggest rise over each skill's starting value for the role */
+  const starts = new Map();
+  for (const s of skills) {
+    const start = ROLE_LIBRARY_STARTS.get(s.name);
+    if (start !== undefined) starts.set(s.name, start);
+  }
+  const maxGain = skills.reduce(
+    (max, s) => Math.max(max, s.value - (starts.get(s.name) ?? s.value)),
+    0
+  );
+  return {
+    xpTotal: xpTotalFor(profileId),
+    level,
+    readiness: profile?.readiness ?? 0,
+    resourcesCompleted: completed,
+    checkpointCorrect: checkpoint.right,
+    checkpointsTaken: checkpoint.n,
+    tasksDone,
+    projectsUploaded: projects,
+    applicationsSent: applications,
+    maxSkillGain: maxGain,
+  };
+}
+
+/* Starting values from the role library, used for the Skill Up badge */
+const ROLE_LIBRARY_STARTS = new Map(
+  Object.values(ROLE_LIBRARY)
+    .flat()
+    .map(([name, value]) => [name, value])
+);
 
 export const q = {
   driver: "sqlite",
@@ -687,6 +800,65 @@ export const q = {
           .prepare("INSERT INTO chat_messages (profile_id, from_party, text) VALUES (?, ?, ?)")
           .run(profileId, from, text)
       ),
+  },
+
+  /* ---------------- Gamification (XP, levels, badges, projects) ---------------- */
+  gamification: {
+    /* Record XP for an action. Returns { xpTotal, awarded } or null if this
+       exact action+ref was already rewarded (idempotent). */
+    addXp: (profileId, action, ref, xp, label) =>
+      Promise.resolve(addXpEvent(profileId, action, ref ?? null, xp, label)),
+    xpTotal: (profileId) => Promise.resolve(xpTotalFor(profileId)),
+    recent: (profileId, limit = 20) => Promise.resolve(recentXpEvents(profileId, limit)),
+    stats: (profileId, level) => Promise.resolve(gamificationStats(profileId, level)),
+    /* Persist any newly-earned badges; return the full unlocked list with isNew flags */
+    syncBadges: (profileId, earnedIds) => {
+      const ins = db.prepare(
+        "INSERT OR IGNORE INTO unlocked_badges (profile_id, badge_id, unlocked_at) VALUES (?, ?, ?)"
+      );
+      const newly = [];
+      for (const id of earnedIds) {
+        const info = ins.run(profileId, id, new Date().toISOString());
+        if (info.changes > 0) newly.push(id);
+      }
+      const rows = db
+        .prepare("SELECT badge_id AS id, unlocked_at AS unlockedAt FROM unlocked_badges WHERE profile_id = ? ORDER BY unlocked_at")
+        .all(profileId);
+      return Promise.resolve({ badges: rows, newly });
+    },
+    badges: (profileId) =>
+      Promise.resolve(
+        db
+          .prepare("SELECT badge_id AS id, unlocked_at AS unlockedAt FROM unlocked_badges WHERE profile_id = ? ORDER BY unlocked_at")
+          .all(profileId)
+      ),
+    /* Projects uploaded by the user */
+    listProjects: (profileId) =>
+      Promise.resolve(
+        db
+          .prepare(
+            "SELECT id, title, skill, url, description, shared_linkedin AS sharedLinkedin, created_at AS createdAt FROM projects WHERE profile_id = ? ORDER BY id DESC"
+          )
+          .all(profileId)
+          .map((p) => ({ ...p, sharedLinkedin: !!p.sharedLinkedin }))
+      ),
+    addProject: (profileId, { title, skill, url, description, sharedLinkedin }) => {
+      const info = db
+        .prepare(
+          "INSERT INTO projects (profile_id, title, skill, url, description, shared_linkedin) VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        .run(
+          profileId,
+          String(title).trim(),
+          skill ?? null,
+          url ?? null,
+          description ?? null,
+          sharedLinkedin ? 1 : 0
+        );
+      return Promise.resolve(
+        db.prepare("SELECT id, title, skill, url, description, shared_linkedin AS sharedLinkedin, created_at AS createdAt FROM projects WHERE id = ?").get(info.lastInsertRowid)
+      );
+    },
   },
 
   /* Real platform aggregates (no synthetic numbers anywhere) */

@@ -72,6 +72,35 @@ export function useStats() {
   return useQuery({ queryKey: ["stats"], queryFn: () => api("/stats") });
 }
 
+export function useAchievements(enabled) {
+  return useQuery({
+    queryKey: ["achievements"],
+    queryFn: () => api("/achievements"),
+    enabled: enabled !== false,
+  });
+}
+
+export function useProjects(enabled) {
+  return useQuery({
+    queryKey: ["projects"],
+    queryFn: () => api("/projects"),
+    enabled: enabled !== false,
+  });
+}
+
+export function useUploadProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (fields) => api("/projects", { method: "POST", body: fields }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["achievements"] });
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      qc.invalidateQueries({ queryKey: ["skills"] });
+    },
+  });
+}
+
 export function useAcademia() {
   return useQuery({ queryKey: ["academia"], queryFn: () => api("/academia") });
 }
@@ -91,7 +120,10 @@ export function useMarkApplied() {
   return useMutation({
     mutationFn: ({ slug, applied }) =>
       api(`/openings/${slug}/applied`, { method: "POST", body: { applied } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["openings"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["openings"] });
+      qc.invalidateQueries({ queryKey: ["achievements"] });
+    },
   });
 }
 
@@ -103,6 +135,7 @@ export function useSetResourceStatus() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["resources"] });
       qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["achievements"] });
     },
   });
 }
@@ -114,6 +147,7 @@ export function useToggleRoadmapTask() {
       api(`/roadmap/tasks/${taskId}`, { method: "POST", body: { done } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["roadmap"] });
+      qc.invalidateQueries({ queryKey: ["achievements"] });
     },
   });
 }
@@ -148,6 +182,7 @@ export function useSubmitCheckpoint() {
       qc.invalidateQueries({ queryKey: ["skills"] });
       qc.invalidateQueries({ queryKey: ["profile"] });
       qc.invalidateQueries({ queryKey: ["readiness"] });
+      qc.invalidateQueries({ queryKey: ["achievements"] });
     },
   });
 }
