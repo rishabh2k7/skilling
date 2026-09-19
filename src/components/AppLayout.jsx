@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { Brand, Badge, EASE } from "@/components/ui";
+import { UserAvatar } from "@/components/UserAvatar";
 import { useAuth } from "@/lib/auth";
 import { useProfile, useAchievements } from "@/lib/api";
 import AuthModal from "@/components/AuthModal";
@@ -197,33 +198,28 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
                 title="Edit profile"
               >
                 <div className="relative grid h-11 w-11 shrink-0 place-items-center">
-                  {/* Level progress ring around the avatar */}
-                  {achievements?.level ? (
-                    <svg viewBox="0 0 44 44" className="absolute inset-0 h-full w-full -rotate-90">
-                      <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,.14)" strokeWidth="2.5" />
-                      <motion.circle
-                        cx="22" cy="22" r="20" fill="none"
-                        stroke={achievements.level.color}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeDasharray={2 * Math.PI * 20}
-                        animate={{
-                          strokeDashoffset:
-                            2 * Math.PI * 20 * (1 - (achievements.level.progress ?? 0) / 100),
-                        }}
-                        transition={{ duration: 0.8, ease: EASE }}
-                        style={{ filter: `drop-shadow(0 0 3px ${achievements.level.color}99)` }}
-                      />
-                    </svg>
-                  ) : null}
-                  <div
-                    className={`grid h-8 w-8 place-items-center rounded-lg bg-[hsl(var(--accent))] text-xs font-bold text-[hsl(var(--primary))] ${
-                      achievements?.level ? "rounded-full" : ""
-                    }`}
-                    data-testid="user-avatar"
-                  >
-                    {initials}
+                  {/* Illustrated avatar with level ring (round variant) */}
+                  <div className="absolute inset-0">
+                    {achievements?.level ? (
+                      <svg viewBox="0 0 44 44" className="absolute inset-0 h-full w-full -rotate-90">
+                        <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,.14)" strokeWidth="2.5" />
+                        <motion.circle
+                          cx="22" cy="22" r="20" fill="none"
+                          stroke={achievements.level.color}
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeDasharray={2 * Math.PI * 20}
+                          animate={{
+                            strokeDashoffset:
+                              2 * Math.PI * 20 * (1 - (achievements.level.progress ?? 0) / 100),
+                          }}
+                          transition={{ duration: 0.8, ease: EASE }}
+                          style={{ filter: `drop-shadow(0 0 3px ${achievements.level.color}99)` }}
+                        />
+                      </svg>
+                    ) : null}
                   </div>
+                  <UserAvatar name={user.name} level={achievements?.level} size={36} testId="user-avatar" />
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-xs font-bold" data-testid="user-name">{user.name}</p>
@@ -425,20 +421,8 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
                     />
                   </svg>
                 ) : null}
-                {/* hexagon tile with initials */}
-                <div
-                  className="grid h-8 w-8 place-items-center text-[11px] font-black text-white"
-                  style={{
-                    background: achievements?.level
-                      ? `linear-gradient(145deg, ${achievements.level.color}55, #17181c 70%)`
-                      : "hsl(var(--primary))",
-                    clipPath:
-                      "polygon(25% 3%, 75% 3%, 98% 50%, 75% 97%, 25% 97%, 2% 50%)",
-                  }}
-                  data-testid="user-avatar"
-                >
-                  {initials}
-                </div>
+                {/* illustrated character portrait in the gamer frame */}
+                <UserAvatar name={user.name} level={achievements?.level} size={38} hex testId="user-avatar" />
                 {/* level badge chip */}
                 {achievements?.level ? (
                   <motion.span
