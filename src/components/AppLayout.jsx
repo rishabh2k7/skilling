@@ -379,12 +379,83 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
               <MessageCircle size={19} />
             </button>
             {user ? (
-              <div
-                className="grid h-9 w-9 place-items-center rounded-lg bg-[hsl(var(--primary))] text-xs font-bold text-[hsl(var(--primary-foreground))]"
-                title={`${user.name} (${user.email})`}
+              /* Gamer-style level avatar: hexagon frame, neon level ring, pulsing glow, XP chip */
+              <motion.button
+                onClick={() => navigate(role === "student" ? "/student/achievements" : "/student")}
+                data-testid="header-avatar"
+                title={`${user.name} — Level ${achievements?.level?.level ?? 1} ${achievements?.level?.title ?? ""} · ${achievements?.xpTotal ?? 0} XP`}
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.94 }}
+                transition={{ type: "spring", stiffness: 400, damping: 18 }}
+                className="relative grid h-11 w-11 place-items-center"
               >
-                {initials}
-              </div>
+                {/* pulsing neon glow */}
+                <motion.span
+                  aria-hidden="true"
+                  className="absolute inset-0 rounded-2xl"
+                  animate={
+                    achievements?.level
+                      ? {
+                          boxShadow: [
+                            `0 0 6px ${achievements.level.color}44`,
+                            `0 0 16px ${achievements.level.color}88`,
+                            `0 0 6px ${achievements.level.color}44`,
+                          ],
+                        }
+                      : undefined
+                  }
+                  transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
+                />
+                {/* level progress ring */}
+                {achievements?.level ? (
+                  <svg viewBox="0 0 44 44" className="absolute inset-0 h-full w-full -rotate-90">
+                    <circle cx="22" cy="22" r="19" fill="none" stroke="rgba(255,255,255,.12)" strokeWidth="3" />
+                    <motion.circle
+                      cx="22" cy="22" r="19" fill="none"
+                      stroke={achievements.level.color}
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeDasharray={2 * Math.PI * 19}
+                      animate={{
+                        strokeDashoffset:
+                          2 * Math.PI * 19 * (1 - (achievements.level.progress ?? 0) / 100),
+                      }}
+                      transition={{ duration: 0.8, ease: EASE }}
+                      style={{ filter: `drop-shadow(0 0 4px ${achievements.level.color})` }}
+                    />
+                  </svg>
+                ) : null}
+                {/* hexagon tile with initials */}
+                <div
+                  className="grid h-8 w-8 place-items-center text-[11px] font-black text-white"
+                  style={{
+                    background: achievements?.level
+                      ? `linear-gradient(145deg, ${achievements.level.color}55, #17181c 70%)`
+                      : "hsl(var(--primary))",
+                    clipPath:
+                      "polygon(25% 3%, 75% 3%, 98% 50%, 75% 97%, 25% 97%, 2% 50%)",
+                  }}
+                  data-testid="user-avatar"
+                >
+                  {initials}
+                </div>
+                {/* level badge chip */}
+                {achievements?.level ? (
+                  <motion.span
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 500, damping: 16, delay: 0.2 }}
+                    className="absolute -bottom-1.5 -right-1.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-[hsl(var(--background))] px-1 text-[9px] font-black text-white"
+                    style={{
+                      background: achievements.level.color,
+                      boxShadow: `0 0 8px ${achievements.level.color}aa`,
+                    }}
+                    data-testid="header-avatar-level"
+                  >
+                    {achievements.level.level}
+                  </motion.span>
+                ) : null}
+              </motion.button>
             ) : (
               <button
                 onClick={() => openAuth("register")}

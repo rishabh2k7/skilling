@@ -125,6 +125,30 @@ const BUTTON_VARIANTS = {
     "bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] hover:-translate-y-0.5",
 };
 
+/** Shared shine-sweep overlay for interactive buttons */
+function ButtonShine() {
+  return (
+    <motion.span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]"
+      initial={{ opacity: 0 }}
+      whileHover={{ opacity: 1 }}
+      // parent hover triggers child animations via variants
+      variants={{ hover: { opacity: 1 } }}
+    >
+      <motion.span
+        className="absolute inset-y-0 w-1/3"
+        style={{
+          background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,.45) 50%, transparent 100%)",
+        }}
+        initial={{ x: "-160%" }}
+        variants={{ hover: { x: "+340%" } }}
+        transition={{ duration: 0.9, ease: EASE }}
+      />
+    </motion.span>
+  );
+}
+
 export function Button({
   children,
   onClick,
@@ -134,18 +158,50 @@ export function Button({
   type = "button",
   disabled,
 }) {
+  const reduced = useReducedMotion();
   return (
     <motion.button
       type={type}
       onClick={onClick}
       disabled={disabled}
-      whileHover={disabled ? undefined : { scale: 1.02, y: -2 }}
-      whileTap={disabled ? undefined : { scale: 0.97 }}
-      transition={{ type: "spring", stiffness: 420, damping: 24 }}
+      initial={reduced ? false : "rest"}
+      animate={reduced ? undefined : "rest"}
+      whileHover={disabled || reduced ? undefined : "hover"}
+      whileTap={disabled || reduced ? { scale: 0.96 } : { scale: 0.94, rotate: -0.6 }}
+      transition={{ type: "spring", stiffness: 480, damping: 22 }}
       data-testid={testId}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold transition-all duration-200 ${BUTTON_VARIANTS[variant]} ${disabled ? "cursor-not-allowed opacity-50" : ""} ${className}`}
+      className={`group relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-lg px-4 py-2.5 text-sm font-bold transition-all duration-200 ${BUTTON_VARIANTS[variant]} ${disabled ? "cursor-not-allowed opacity-50" : ""} ${className}`}
     >
-      {children}
+      {/* shine sweep on hover */}
+      <motion.span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 rounded-[inherit]"
+        variants={{ rest: { opacity: 0 }, hover: { opacity: 1 } }}
+        transition={{ duration: 0.15 }}
+      >
+        <motion.span
+          className="absolute inset-y-0 -left-1/3 w-1/3"
+          style={{
+            background: "linear-gradient(105deg, transparent 0%, rgba(255,255,255,.5) 50%, transparent 100%)",
+          }}
+          variants={{
+            rest: { x: "-120%" },
+            hover: { x: "+420%" },
+          }}
+          transition={{ duration: 0.85, ease: EASE }}
+        />
+      </motion.span>
+      {/* springy icon nudge: last child (usually an arrow icon) shifts on hover */}
+      <motion.span
+        className="relative z-[1] inline-flex items-center gap-2 [&>svg]:transition-transform [&>svg]:duration-200"
+        variants={{
+          rest: { x: 0 },
+          hover: { x: 2 },
+        }}
+        transition={{ type: "spring", stiffness: 500, damping: 26 }}
+      >
+        {children}
+      </motion.span>
     </motion.button>
   );
 }

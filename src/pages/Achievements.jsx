@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { BookOpen, Home, Link2, Lock, Radar, Sparkles, Trophy, Upload, Zap } from "lucide-react";
+import { Link2, Lock, Sparkles, Trophy, Upload, Zap } from "lucide-react";
 import {
   Badge,
   Button,
@@ -11,7 +11,6 @@ import {
   EASE,
 } from "@/components/ui";
 import { PixelBadgeFrame, LockedBadge, XpBar, useGamify } from "@/components/Gamify";
-import { MagneticDock } from "@/components/ui/magnetic-dock";
 import { useAchievements, useProjects, useUploadProject } from "@/lib/api";
 import { openAuthModal } from "@/components/AuthGate";
 
@@ -61,37 +60,6 @@ export default function Achievements({ user, navigate }) {
   const all = data?.allBadges ?? [];
   const projects = projectsData?.projects ?? [];
   const recent = data?.recent ?? [];
-
-  /* Quick-action dock for this page */
-  const dockItems = [
-    {
-      id: "overview",
-      label: "Overview",
-      icon: <Home className="h-full w-full" />,
-      onClick: () => navigate("/student"),
-    },
-    {
-      id: "skills",
-      label: "Skill DNA",
-      icon: <Radar className="h-full w-full" />,
-      onClick: () => navigate("/student/skills"),
-    },
-    {
-      id: "resources",
-      label: "Earn XP in Resources",
-      icon: <BookOpen className="h-full w-full" />,
-      onClick: () => navigate("/student/resources"),
-    },
-    {
-      id: "upload",
-      label: "Ship a project (+100 XP)",
-      icon: <Upload className="h-full w-full" />,
-      onClick: () => {
-        setShowUpload(true);
-        document.getElementById("shipped-projects")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      },
-    },
-  ];
 
   return (
     <PageTransition>
@@ -228,7 +196,6 @@ export default function Achievements({ user, navigate }) {
 
       {/* Projects */}
       <Reveal className="mx-auto mt-8 max-w-4xl" delay={0.1}>
-        <div id="shipped-projects" className="scroll-mt-24" />
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-display text-lg font-bold">Shipped projects</h3>
           <Button variant="outline" testId="button-show-upload" onClick={() => setShowUpload((s) => !s)}>
@@ -334,17 +301,6 @@ export default function Achievements({ user, navigate }) {
           </div>
         </Reveal>
       )}
-
-      {/* Quick-action magnetic dock */}
-      <motion.div
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: 0.6, ease: EASE }}
-        className="fixed bottom-6 left-1/2 z-40 -translate-x-1/2"
-        data-testid="achievements-dock"
-      >
-        <MagneticDock items={dockItems} iconSize={50} maxScale={1.55} magneticDistance={130} showLabels variant="glass" />
-      </motion.div>
     </PageTransition>
   );
 }
