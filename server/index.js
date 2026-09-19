@@ -6,6 +6,14 @@ import { fileURLToPath } from "url";
 import { askAI, getProviderStatus } from "./ai.js";
 import { qReady } from "./storage/index.js";
 import { sessionMiddleware, authRoutes } from "./auth.js";
+import {
+  OPENINGS,
+  RESOURCES,
+  QUESTION_BANK,
+  CHECKPOINT_SIZE,
+  pickCheckpointSkill,
+  ROLE_LIBRARY,
+} from "./catalog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -22,77 +30,174 @@ process.on("unhandledRejection", (reason) => {
 });
 
 /* Resolve the active storage driver (MongoDB Atlas when MONGODB_URI is set, else SQLite).
-   Initialization is awaited once; every request just does `const q = await qReady()`. */
+   Initialization is awaited once; every request just does `const q = await store()`. */
 let qPromise = null;
 function store() {
   if (!qPromise) qPromise = qReady();
   return qPromise;
 }
 
-async function getProfile(req) {
-  const q = await store();
-  if (req.user) {
-    let profile = await q.profile.getByUserId(req.user.id);
-    if (!profile) {
-      profile = await q.profile.createForUser(req.user.id, req.user.name, "Full Stack Developer");
-    }
-    return profile;
+/* Production rule: everything personal requires a signed-in user.
+   Guests get 401s from data endpoints; the frontend shows the auth modal. */
+async function requireProfile(req, res) {
+  if (!req.user) {
+    res.status(401).json({ error: "Sign in to access your data.", code: "auth_required" });
+    return null;
   }
-  return q.profile.getDefault();
+  const q = await store();
+  let profile = await q.profile.getByUserId(req.user.id);
+  if (!profile) {
+    profile = await q.profile.createForUser(req.user.id, req.user.name, "Full Stack Developer");
+  }
+  return profile;
+}
+
+/* Recompute readiness + next-best-skill server-side and log to history */
+async function recomputeProfile(q, profileId) {
+  const skills = await q.skills.listByProfile(profileId);
+  const avg = Math.round(skills.reduce((a, s) => a + s.value, 0) / Math.max(1, skills.length));
+  const weakest = [...skills].sort((a, b) => a.value - b.value)[0];
+  const current = await q.profile.get(profileId);
+  const updated = await q.profile.update(profileId, {
+    readiness: avg,
+    nextBestSkill: weakest?.name ?? null,
+  });
+  /* Record a momentum point only when readiness actually moved */
+  if (current && current.readiness !== updated.readiness) {
+    await q.readiness.record(profileId, updated.readiness);
+  }
+  return updated;
+}
+
+/* Score the role briefs against the user's Skill DNA (server-side — never fakeable) */
+async function matchedOpenings(q, profileId) {
+  const [skills, savedRows] = await Promise.all([
+    q.skills.listByProfile(profileId),
+    q.openings.saved(profileId),
+  ]);
+  const savedMap = Object.fromEntries(savedRows.map((s) => [s.slug, s.applied]));
+  const skillLevel = Object.fromEntries(skills.map((s) => [s.name, s.value]));
+
+  const scored = OPENINGS.map((o) => {
+    let match = 0;
+    const gaps = [];
+    for (const [skill, weight] of Object.entries(o.skills)) {
+      const v = skillLevel[skill] ?? 0;
+      match += v * weight;
+      if (v < 50) gaps.push({ skill, value: v });
+    }
+    gaps.sort((a, b) => a.value - b.value);
+    const topGap = gaps[0];
+    return {
+      ...o,
+      match: Math.round(match),
+      topGap: topGap
+        ? `Closest gap: ${topGap.skill} (${topGap.value}/100) — the ${o.level.toLowerCase()}-level bar here is around 50.`
+        : "You clear every skill bar for this brief — ready to apply.",
+      gapSkill: topGap?.skill ?? null,
+      saved: !!savedMap[o.slug],
+      applied: savedMap[o.slug] === 1,
+    };
+  });
+
+  return scored.sort((a, b) => b.match - a.match);
+}
+
+/* Build a personalized checkpoint: CHECKPOINT_SIZE unseen questions for the
+   user's weakest banked skill, using the shared production question bank. */
+async function buildCheckpoint(q, profileId) {
+  const skills = await q.skills.listByProfile(profileId);
+  const skillName = pickCheckpointSkill(skills);
+  if (!skillName) return null;
+
+  const history = await q.checkpoints.history(profileId);
+  const asked = new Set(history.map((h) => h.questionId));
+  let pool = QUESTION_BANK[skillName].filter((qu) => !asked.has(qu[0]));
+  if (!pool.length) pool = QUESTION_BANK[skillName]; // recycle once the bank is exhausted
+
+  const questions = pool
+    .slice(0, CHECKPOINT_SIZE)
+    .map(([id, question, options, , explanation]) => ({
+      id,
+      question,
+      options,
+      /* correct_index never leaves the server */
+    }));
+
+  return {
+    skill: skillName,
+    questions,
+    total: Math.min(CHECKPOINT_SIZE, pool.length),
+    history: { taken: history.length, correct: history.filter((h) => h.correct).length },
+  };
 }
 
 /* ---------------- Health ---------------- */
 
 app.get("/api/health", async (_req, res) => {
   const q = await store();
-  const profileCount = await q.profile.countAll?.();
+  const stats = await q.stats.overall();
   res.json({
     ok: true,
     storage: q.driver === "mongodb" ? "mongodb-atlas" : "sqlite",
-    profiles: typeof profileCount === "number" ? profileCount : undefined,
+    stats,
     provider: getProviderStatus(),
   });
 });
+
+/* ---------------- Auth (see auth.js) ---------------- */
 
 /* ---------------- Profile + Skill DNA ---------------- */
 
 app.get("/api/profile", async (req, res) => {
   const q = await store();
-  const profile = await getProfile(req);
-  if (!profile) return res.status(404).json({ error: "no profile" });
+  if (!req.user) return res.json({ user: null });
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   res.json({
     ...profile,
-    isDemo: !req.user,
-    user: req.user ? { id: req.user.id, name: req.user.name, email: req.user.email } : null,
+    isDemo: false,
+    user: { id: req.user.id, name: req.user.name, email: req.user.email },
   });
 });
 
 app.get("/api/skills", async (req, res) => {
   const q = await store();
-  const profile = await getProfile(req);
-  if (!profile) return res.status(404).json({ error: "no profile" });
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   res.json({
     role: profile.target_role,
     readiness: profile.readiness,
     nextBestSkill: profile.next_best_skill,
-    isDemo: !req.user,
+    isDemo: false,
     skills: await q.skills.listByProfile(profile._id ?? profile.id),
   });
 });
 
-/* Edit the signed-in user's profile (name, target role). Guests cannot edit. */
+/* Edit the signed-in user's profile (name, target role, LinkedIn URL). */
 app.patch("/api/profile", async (req, res) => {
-  if (!req.user) return res.status(401).json({ error: "Sign in to edit your profile." });
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
-  if (!profile) return res.status(404).json({ error: "no profile" });
 
-  const { name, targetRole } = req.body || {};
+  const { name, targetRole, linkedinUrl } = req.body || {};
   if (name !== undefined && !String(name).trim()) {
     return res.status(400).json({ error: "Name cannot be empty." });
   }
-  if (targetRole !== undefined && String(targetRole).trim().length > 80) {
-    return res.status(400).json({ error: "Target role is too long." });
+  if (targetRole !== undefined) {
+    const t = String(targetRole).trim();
+    if (t.length > 80) return res.status(400).json({ error: "Target role is too long." });
+    if (t && !ROLE_LIBRARY[t]) {
+      return res.status(400).json({ error: "Unknown target role." });
+    }
+  }
+  if (linkedinUrl !== undefined && String(linkedinUrl).trim()) {
+    const u = String(linkedinUrl).trim();
+    if (!/^https?:\/\/(www\.)?linkedin\.com\/in\//i.test(u)) {
+      return res.status(400).json({
+        error: "Enter a full LinkedIn profile URL like https://linkedin.com/in/your-handle",
+      });
+    }
   }
 
   if (name !== undefined && String(name).trim() !== req.user.name) {
@@ -101,22 +206,21 @@ app.patch("/api/profile", async (req, res) => {
   const updated = await q.profile.update(profile._id ?? profile.id, {
     ...(name !== undefined ? { name } : {}),
     ...(targetRole !== undefined ? { targetRole } : {}),
+    ...(linkedinUrl !== undefined ? { linkedinUrl } : {}),
   });
 
   res.json({
     ...updated,
     isDemo: false,
-    user: { id: req.user.id, name: String(name ?? req.user.name).trim(), email: req.user.email },
+    user: { id: req.user.id, name: req.user.name, email: req.user.email },
   });
 });
 
-/* Edit the signed-in user's skill scores. Readiness recomputes server-side:
-   average of all skills; next-best-skill = the lowest-scored skill. */
+/* Edit the signed-in user's skill scores. Readiness recomputes server-side. */
 app.patch("/api/skills", async (req, res) => {
-  if (!req.user) return res.status(401).json({ error: "Sign in to edit your Skill DNA." });
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
-  if (!profile) return res.status(404).json({ error: "no profile" });
 
   const items = Array.isArray(req.body?.skills) ? req.body.skills : [];
   if (!items.length) return res.status(400).json({ error: "skills array required" });
@@ -125,12 +229,7 @@ app.patch("/api/skills", async (req, res) => {
   }
 
   const skills = await q.skills.setMultiple(profile._id ?? profile.id, items);
-  const avg = Math.round(skills.reduce((a, s) => a + s.value, 0) / Math.max(1, skills.length));
-  const weakest = [...skills].sort((a, b) => a.value - b.value)[0];
-  const updated = await q.profile.update(profile._id ?? profile.id, {
-    readiness: avg,
-    nextBestSkill: weakest?.name ?? profile.next_best_skill,
-  });
+  const updated = await recomputeProfile(q, profile._id ?? profile.id);
 
   res.json({
     role: updated.target_role,
@@ -141,53 +240,91 @@ app.patch("/api/skills", async (req, res) => {
   });
 });
 
-/* ---------------- Opportunities ---------------- */
+/* ---------------- Openings (LinkedIn-apply) ---------------- */
 
-app.get("/api/opportunities", async (req, res) => {
+app.get("/api/openings", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
-  const all = await q.opportunities.all();
-  const saved = profile ? await q.opportunities.saved(profile._id ?? profile.id) : [];
-  const savedMap = Object.fromEntries(saved.map((s) => [s.opportunity_id, s.applied]));
-  res.json(
-    all.map((o) => ({
-      ...o,
-      id: o.id ?? o._id,
-      saved: o.id in savedMap || o._id in savedMap,
-      applied: savedMap[o.id ?? o._id] === 1,
-    }))
-  );
+  const openings = await matchedOpenings(q, profile._id ?? profile.id);
+  res.json({
+    openings,
+    profile: {
+      targetRole: profile.target_role,
+      readiness: profile.readiness,
+      linkedinUrl: profile.linkedin_url ?? null,
+    },
+  });
 });
 
-app.post("/api/opportunities/:id/save", async (req, res) => {
+app.post("/api/openings/:slug/save", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
-  const result = await q.opportunities.toggleSave(profile._id ?? profile.id, Number(req.params.id));
-  res.json(result);
+  if (!OPENINGS.some((o) => o.slug === req.params.slug)) {
+    return res.status(404).json({ error: "Unknown opening." });
+  }
+  res.json(await q.openings.toggleSave(profile._id ?? profile.id, req.params.slug));
 });
 
-app.post("/api/opportunities/:id/apply", async (req, res) => {
+/* Marks "applied" — the apply click itself goes to LinkedIn in a new tab */
+app.post("/api/openings/:slug/applied", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
   const applied = !!req.body?.applied;
-  const result = await q.opportunities.setApplied(profile._id ?? profile.id, Number(req.params.id), applied);
+  res.json(await q.openings.setApplied(profile._id ?? profile.id, req.params.slug, applied));
+});
+
+/* ---------------- Learning resources ---------------- */
+
+app.get("/api/resources", async (req, res) => {
+  const q = await store();
+  let statuses = [];
+  if (req.user) {
+    const profile = await q.profile.getByUserId(req.user.id);
+    if (profile) statuses = await q.resources.statusFor(profile._id ?? profile.id);
+  }
+  res.json({
+    resources: RESOURCES,
+    statuses,
+    signedIn: !!req.user,
+  });
+});
+
+app.post("/api/resources/:id/status", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  const status = String(req.body?.status || "");
+  if (!["saved", "in_progress", "completed", "none"].includes(status)) {
+    return res.status(400).json({ error: "status must be saved | in_progress | completed | none" });
+  }
+  if (!RESOURCES.some((r) => r.id === req.params.id)) {
+    return res.status(404).json({ error: "Unknown resource." });
+  }
+  const result = await q.resources.setStatus(profile._id ?? profile.id, req.params.id, status);
+  if (status === "completed") {
+    await recomputeProfile(q, profile._id ?? profile.id);
+  }
   res.json(result);
 });
 
 /* ---------------- Roadmap ---------------- */
 
 app.get("/api/roadmap", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
-  if (!profile) return res.status(404).json({ error: "no profile" });
   const steps = await q.roadmap.listByProfile(profile._id ?? profile.id);
   const done = steps.filter((s) => s.status === "complete").length;
   res.json({ steps, done, total: steps.length });
 });
 
 app.post("/api/roadmap/:stepId", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
   const complete = !!req.body?.complete;
   const done = await q.roadmap.setComplete(profile._id ?? profile.id, req.params.stepId, complete);
   if (done === null) return res.status(404).json({ error: "unknown step" });
@@ -195,43 +332,77 @@ app.post("/api/roadmap/:stepId", async (req, res) => {
   res.json({ steps, done, total: steps.length });
 });
 
-/* ---------------- Assessments ---------------- */
-
-app.get("/api/assessments/next", async (req, res) => {
+/* Readiness trail for the momentum chart (real recorded changes only) */
+app.get("/api/readiness/history", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
-  const a = await q.assessments.firstForProfile(profile._id ?? profile.id);
-  if (!a) return res.status(404).json({ error: "no assessments" });
+  res.json(await q.readiness.history(profile._id ?? profile.id, 14));
+});
+
+/* ---------------- Checkpoints (server-graded, moves Skill DNA) ---------------- */
+
+app.get("/api/checkpoints/next", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  const cp = await buildCheckpoint(q, profile._id ?? profile.id);
+  if (!cp) return res.status(404).json({ error: "no checkpoint available" });
+  res.json(cp);
+});
+
+/* Grade the whole checkpoint server-side; correct answers bump the skill. */
+app.post("/api/checkpoints/:skill/submit", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
+  const q = await store();
+  const profileId = profile._id ?? profile.id;
+
+  const answers = req.body?.answers;
+  if (!Array.isArray(answers)) {
+    return res.status(400).json({ error: "answers array required" });
+  }
+
+  const bank = QUESTION_BANK[req.params.skill];
+  if (!bank) return res.status(404).json({ error: "Unknown checkpoint skill." });
+
+  const results = [];
+  let correctCount = 0;
+  for (const a of answers) {
+    const def = bank.find(([id]) => id === a?.id);
+    if (!def) continue;
+    const [id, , , correctIndex, explanation] = def;
+    const selected = Number(a.selectedIndex);
+    const correct = selected === correctIndex;
+    if (correct) correctCount += 1;
+    await q.checkpoints.record(profileId, req.params.skill, id, selected, correct);
+    results.push({ id, correct, explanation, correctIndex: correct ? correctIndex : undefined });
+  }
+
+  /* Every correct answer lifts the skill score — checkpoint results are real signals. */
+  const bumpPerCorrect = 2;
+  if (correctCount > 0) {
+    await q.skills.bump(profileId, req.params.skill, correctCount * bumpPerCorrect);
+  }
+  const updated = await recomputeProfile(q, profileId);
+
   res.json({
-    id: a.id ?? a._id,
-    skill: a.skill,
-    question: a.question,
-    options: a.options,
-    attempts: await q.assessments.attemptCount(profile._id ?? profile.id),
+    skill: req.params.skill,
+    correct: correctCount,
+    total: results.length,
+    score: results.length ? Math.round((correctCount / results.length) * 100) : 0,
+    bump: correctCount * bumpPerCorrect,
+    readiness: updated.readiness,
+    nextBestSkill: updated.next_best_skill,
+    results,
   });
 });
 
-app.post("/api/assessments/:id/attempt", async (req, res) => {
+app.get("/api/checkpoints/stats", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
-  const selectedIndex = req.body?.selectedIndex;
-  if (typeof selectedIndex !== "number") {
-    return res.status(400).json({ error: "selectedIndex required" });
-  }
-  const { correct } = await q.assessments.recordAttempt(
-    Number(req.params.id),
-    profile._id ?? profile.id,
-    selectedIndex
-  );
-  res.json({
-    correct,
-    feedback: correct
-      ? "Correct. Your Docker signal is ready to move."
-      : "Not quite — the useful distinction is portability.",
-    detail: correct
-      ? "This confirms the concept behind your next-best project."
-      : "Review the difference between a container, a cloud provider, and a runtime, then try again.",
-  });
+  res.json(await q.checkpoints.stats(profile._id ?? profile.id));
 });
 
 /* ---------------- AI chat (persisted per user) ---------------- */
@@ -242,8 +413,12 @@ app.post("/api/ai/chat", async (req, res) => {
     if (!message || !String(message).trim()) {
       return res.status(400).json({ error: "message is required" });
     }
+    if (!req.user) {
+      return res.status(401).json({ error: "Sign in to chat with the assistant.", code: "auth_required" });
+    }
     const q = await store();
-    const profile = await getProfile(req);
+    const profile = await requireProfile(req, res);
+    if (!profile) return;
     const history = await q.chat.history(profile._id ?? profile.id, 10);
 
     const reply = await askAI(String(message), history, { profile });
@@ -262,25 +437,24 @@ app.post("/api/ai/chat", async (req, res) => {
 });
 
 app.get("/api/ai/chat/history", async (req, res) => {
+  const profile = await requireProfile(req, res);
+  if (!profile) return;
   const q = await store();
-  const profile = await getProfile(req);
   res.json(await q.chat.history(profile._id ?? profile.id, 100));
 });
 
-/* ---------------- Academia aggregates ---------------- */
+/* ---------------- Community stats (real aggregates) ---------------- */
+
+app.get("/api/stats", async (_req, res) => {
+  const q = await store();
+  res.json(await q.stats.overall());
+});
+
+/* ---------------- Academia aggregates (real, privacy-masked) ---------------- */
 
 app.get("/api/academia", async (_req, res) => {
   const q = await store();
-  res.json({
-    pulses: await q.academia.pulses(),
-    interventions: await q.academia.interventions(),
-    stats: {
-      activeLearners: 1284,
-      mappedSkills: 96,
-      evidenceCreated: 3412,
-      pathwayLift: 14,
-    },
-  });
+  res.json(await q.stats.academia());
 });
 
 /* ---------------- Static frontend (production) ---------------- */

@@ -1,22 +1,25 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
+import { Linkedin, X } from "lucide-react";
 import { Button, EASE } from "@/components/ui";
-import { useUpdateProfile } from "@/lib/api";
+import { useUpdateProfile, useProfile } from "@/lib/api";
 
 const ROLES = [
   "Full Stack Developer",
-  "Data Analyst",
   "Frontend Engineer",
   "Backend Engineer",
+  "Data Analyst",
   "ML Engineer",
+  "Cloud/DevOps Engineer",
   "Product Manager",
 ];
 
 export default function ProfileModal({ open, onClose, user, targetRole }) {
   const update = useUpdateProfile();
+  const { data: profile } = useProfile();
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -24,20 +27,35 @@ export default function ProfileModal({ open, onClose, user, targetRole }) {
     if (open) {
       setName(user?.name || "");
       setRole(targetRole || "");
+      setLinkedinUrl(profile?.linkedin_url || "");
       setError("");
       setSaved(false);
     }
-  }, [open, user, targetRole]);
+  }, [open, user, targetRole, profile?.linkedin_url]);
+
+  /* Opportunities page can open this modal directly */
+  useEffect(() => {
+    const handler = () => {
+      window.dispatchEvent(new CustomEvent("open-profile-modal"));
+    };
+    /* AppLayout wires open-profile-modal; nothing needed here beyond noop safety */
+    return () => window.removeEventListener("open-profile-edit", handler);
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
     setError("");
     setSaved(false);
     if (!name.trim()) return setError("Your name cannot be empty.");
+    const cleanUrl = linkedinUrl.trim();
+    if (cleanUrl && !/^https?:\/\/(www\.)?linkedin\.com\/in\//i.test(cleanUrl)) {
+      return setError("Use a full LinkedIn profile URL, e.g. https://linkedin.com/in/your-handle");
+    }
     try {
       await update.mutateAsync({
         name: name.trim(),
         ...(role ? { targetRole: role } : {}),
+        linkedinUrl: cleanUrl,
       });
       setSaved(true);
       setTimeout(onClose, 700);
@@ -113,13 +131,29 @@ export default function ProfileModal({ open, onClose, user, targetRole }) {
                     </option>
                   ))}
                 </select>
+                <p className="mt-1.5 text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">
+                  Changing roles reseeds your opportunity matches — your scores stay put.
+                </p>
+              </div>
+              <div>
+                <label className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                  <Linkedin size={12} /> LinkedIn profile URL
+                </label>
+                <input
+                  value={linkedinUrl}
+                  onChange={(e) => setLinkedinUrl(e.target.value)}
+                  data-testid="input-profile-linkedin"
+                  className="w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 py-2.5 text-sm outline-none focus:border-[hsl(var(--secondary-foreground))]"
+                  placeholder="https://linkedin.com/in/your-handle"
+                  type="url"
+                />
               </div>
               <p className="text-xs text-[hsl(var(--muted-foreground))]">
                 Signed in as {user?.email}
               </p>
 
               {error && (
-                <p className="rounded-lg bg-[hsl(var(--destructive))]/10 px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]">
+                <p className="rounded-lg bg-[hsl(var(--destructive))]/10 px-3 py-2 text-xs font-semibold text-[hsl(var(--destructive))]" data-testid="profile-error">
                   {error}
                 </p>
               )}

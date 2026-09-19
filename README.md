@@ -31,10 +31,11 @@ sensitive ships to clients.
 
 | File | Purpose |
 | --- | --- |
-| `server/index.js` | Express app: profile, skills, opportunities, roadmap, assessments, AI chat, academia — serves `dist/` in production |
+| `server/index.js` | Express app: auth-gated profile, skills, openings, resources, checkpoints, roadmap, AI chat, stats — serves `dist/` in production |
+| `server/catalog.js` | Production catalog: real learning resources (lectures/courses/docs/books), role library, LinkedIn-linked role briefs, checkpoint question bank |
 | `server/storage/index.js` | Storage selector: MongoDB Atlas when `MONGODB_URI` is set, otherwise SQLite |
-| `server/storage/sqlite.js` | SQLite backend (better-sqlite3): schema, migrations, seed, query helpers |
-| `server/storage/mongo.js` | MongoDB Atlas backend: identical interface, indexes, TTL sessions, seed |
+| `server/storage/sqlite.js` | SQLite backend (better-sqlite3): production schema, migrations, query helpers |
+| `server/storage/mongo.js` | MongoDB Atlas backend: identical interface, indexes, TTL sessions |
 | `server/auth.js` | Register / login / logout / session cookie handling |
 | `server/ai.js` | Provider layer + system prompt. Add new providers to the `PROVIDERS` array |
 
@@ -55,9 +56,9 @@ MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/?retryWrites=t
 MONGODB_DB=skilling   # optional — defaults to the db name in the URI, or "skilling"
 ```
 
-5. Restart the server. Demo data is seeded automatically on first connect; the DB upgrades
-   itself with indexes and a TTL index that purges expired sessions. Log out / log in state,
-   saved opportunities, roadmap progress, assessments, and chat history are all stored in Atlas.
+5. Restart the server. The DB upgrades itself with indexes and a TTL index that purges expired
+   sessions. Accounts, Skill DNA, saved openings, resource progress, checkpoint history,
+   readiness history, and chat are all stored in Atlas.
 6. To deploy with Atlas: add `MONGODB_URI` in your host's **Environment** settings
    (Render: Environment; Railway: Variables). No disk attachment is needed — data lives in Atlas.
 
@@ -78,8 +79,8 @@ about checking the URI and Network Access.
 
 ### Option B — SQLite (default, zero setup)
 
-- Local file at `data/skilling.db` (change folder with `DATA_DIR`); created and seeded on boot.
-- **Delete `data/skilling.db`** to reset to fresh demo state.
+- Local file at `data/skilling.db` (change folder with `DATA_DIR`); created empty on boot —
+  the first sign-up becomes learner #1.
 - In Docker the app writes to `/app/data`; attach a volume there (Railway: configured in
   `railway.json`; Render: attach a disk and set `DATA_DIR=/var/data`).
 
@@ -89,19 +90,26 @@ about checking the URI and Network Access.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/health` | Health + AI provider status |
-| GET | `/api/profile` | Demo learner profile |
+| GET | `/api/health` | Health, storage driver, AI provider, real platform stats |
+| POST | `/api/auth/register` | Create account (seeds Skill DNA for target role) |
+| GET | `/api/profile` | Your profile (401 for guests — no demo persona) |
+| PATCH | `/api/profile` | Edit name, target role, LinkedIn URL |
 | GET | `/api/skills` | Skill DNA (role, readiness, skills) |
-| GET | `/api/opportunities` | Opportunities + saved/applied state |
-| POST | `/api/opportunities/:id/save` | Toggle saved |
-| POST | `/api/opportunities/:id/apply` | Set applied true/false |
+| PATCH | `/api/skills` | Edit scores (readiness recomputes server-side) |
+| GET | `/api/openings` | Role briefs scored live against your Skill DNA, with LinkedIn apply URLs |
+| POST | `/api/openings/:slug/save` | Toggle saved |
+| POST | `/api/openings/:slug/applied` | Mark applied (the apply click opens LinkedIn Jobs) |
+| GET | `/api/resources` | Real lectures/courses/docs/books + your progress |
+| POST | `/api/resources/:id/status` | Track saved / in-progress / completed |
+| GET | `/api/checkpoints/next` | Personalized 5-question checkpoint (answers never leave the server) |
+| POST | `/api/checkpoints/:skill/submit` | Server-graded; correct answers bump your Skill DNA |
+| GET | `/api/readiness/history` | Momentum trail (recorded readiness changes) |
 | GET | `/api/roadmap` | Roadmap steps + progress |
 | POST | `/api/roadmap/:stepId` | Mark step complete/incomplete |
-| GET | `/api/assessments/next` | Next checkpoint question |
-| POST | `/api/assessments/:id/attempt` | Submit answer (server-graded) |
 | POST | `/api/ai/chat` | AI chat (persisted to DB) |
 | GET | `/api/ai/chat/history` | Chat history |
-| GET | `/api/academia` | Curriculum pulses, interventions, stats |
+| GET | `/api/stats` | Real platform aggregates |
+| GET | `/api/academia` | Real, privacy-masked cohort aggregates |
 
 Add your own endpoint in three lines:
 
@@ -117,13 +125,13 @@ just calls `fetch("/api/...")` with no CORS setup.
 ```
 src/
   main.jsx            entry
-  App.jsx             routes: /, /student(+4 subpages), /industry, /academia, /help
+  App.jsx             routes: /, /student(+5 subpages), /industry, /academia, /help
   index.css           design tokens + signature effects (extracted from your site)
-  components/         AppLayout (sidebar/shell), ui.jsx (Button, Badge, cards…)
+  components/         AppLayout (sidebar/shell), AuthGate, ui.jsx (Button, Badge, cards…)
   pages/              one file per page — this is where you edit screens
-  data/skillingData.js  all demo content (skills, opportunities, candidates…)
 server/
   index.js            Express API
+  catalog.js          real resources, roles, openings, question bank
   auth.js             register / login / sessions
   storage/            SQLite + MongoDB Atlas drivers behind one interface
   ai.js               AI providers
@@ -162,6 +170,8 @@ docker run -p 3001:3001 --env-file .env skilling
 
 ## Notes
 
-- All content on the pages is demo data in `src/data/skillingData.js` — edit it there.
-- The Support Desk conversation is stored in localStorage (same as the original app).
+- The platform is production-oriented: no demo personas, no synthetic stats. Guests browse
+  the resource library; every personal feature requires a free account.
+- Individual learner data is private. Industry/Academia pages show only real, privacy-masked
+  aggregates computed from actual accounts.
 - Framer-motion animations, dark mode, and the hero skill network are all preserved.

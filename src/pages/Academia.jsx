@@ -1,100 +1,138 @@
-import { useState } from "react";
 import { FileText, Lightbulb, Radar, TrendingUp, Users } from "lucide-react";
-import { Button, PageHeader, PageTransition, MetricCard, ProgressBar } from "@/components/ui";
+import { Badge, Button, PageHeader, PageTransition, MetricCard, ProgressBar } from "@/components/ui";
 import { useAcademia } from "@/lib/api";
 
+/* Academia workspace — real, privacy-masked aggregates.
+   Learner names are truncated to first name + initial in the store layer. */
 export default function Academia({ navigate }) {
-  const { data } = useAcademia();
-  const [statusMsg, setStatusMsg] = useState("");
+  const { data, isLoading } = useAcademia();
 
-  const pulses = data?.pulses ?? [];
-  const interventions = data?.interventions ?? [];
-  const stats = data?.stats;
+  const pulses = (data?.topSkills ?? []).map((s) => ({
+    label: s.name,
+    percent: s.avgValue,
+    detail: `${s.learners} learner${s.learners === 1 ? "" : "s"} tracking this skill`,
+  }));
+  const roles = data?.roles ?? [];
+  const recent = data?.recent ?? [];
+  const maxRoleCount = Math.max(1, ...roles.map((r) => r.count));
 
   return (
     <PageTransition>
       <PageHeader
-        eyebrow="Academia workspace / Demo cohort"
+        eyebrow="Academia workspace / live cohort"
         title="Make learning outcomes visible."
-        copy="Connect curriculum, learner progress, and industry language without reducing students to a single score. Data is served by the backend."
+        copy="Real aggregates from your institution's learners on the platform — no synthetic numbers. Names are privacy-masked; individuals own their data and choose what to share."
         action={
           <Button
-            onClick={() => setStatusMsg("Cohort report prepared locally.")}
+            onClick={() => navigate("/help")}
             variant="accent"
             testId="button-generate-report"
           >
-            <FileText size={15} /> Generate cohort report
+            <FileText size={15} /> Ask the support desk
           </Button>
         }
       />
 
-      {statusMsg && (
-        <p
-          data-testid="status-report"
-          className="mb-5 rounded-lg bg-[hsl(var(--secondary))] px-4 py-3 text-xs font-bold text-[hsl(var(--secondary-foreground))]"
-        >
-          {statusMsg}
-        </p>
-      )}
-
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Active learners" value={String(stats?.activeLearners ?? 1284)} detail="across 6 pathways" icon={Users} />
-        <MetricCard label="Mapped skills" value={String(stats?.mappedSkills ?? 96)} detail="role-aligned signals" icon={Radar} />
-        <MetricCard label="Evidence created" value={String(stats?.evidenceCreated ?? 3412)} detail="projects + reflections" icon={FileText} />
-        <MetricCard label="Pathway lift" value={`+${stats?.pathwayLift ?? 14}`} detail="readiness points" icon={TrendingUp} />
+        <MetricCard label="Registered learners" value={String(data?.learners ?? 0)} detail="real accounts" icon={Users} />
+        <MetricCard label="Average readiness" value={String(data?.avgReadiness ?? 0)} detail="across all Skill DNA" icon={Radar} />
+        <MetricCard label="Checkpoints taken" value={String(data?.checkpointsTaken ?? 0)} detail={`${data?.checkpointAccuracy ?? 0}% answered correctly`} icon={TrendingUp} />
+        <MetricCard label="Skills tracked" value={String(pulses.length)} detail="distinct skills in cohort DNA" icon={Lightbulb} />
       </div>
 
       <div className="mt-5 grid gap-5 lg:grid-cols-[.85fr_1.15fr]">
         <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
           <p className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-            Curriculum pulse
+            Cohort frontier
           </p>
-          <h2 className="mt-2 font-display text-2xl font-bold">Where learners are getting stuck</h2>
-          <div className="mt-7 space-y-5">
-            {pulses.map((p) => (
-              <div key={p.label}>
-                <div className="mb-2 flex justify-between text-sm">
-                  <span className="font-bold">{p.label}</span>
-                  <span className="font-mono text-xs">{p.percent}%</span>
+          <h2 className="mt-2 font-display text-2xl font-bold">Where learners are weakest</h2>
+          {isLoading ? (
+            <p className="mt-7 text-sm text-[hsl(var(--muted-foreground))]">Loading cohort data…</p>
+          ) : pulses.length === 0 ? (
+            <p className="mt-7 text-sm text-[hsl(var(--muted-foreground))]">
+              No skill data yet. As learners sign up and take checkpoints, the weakest skills across
+              the cohort surface here — that's where teaching time pays most.
+            </p>
+          ) : (
+            <div className="mt-7 space-y-5">
+              {pulses.map((p) => (
+                <div key={p.label}>
+                  <div className="mb-2 flex justify-between text-sm">
+                    <span className="font-bold">{p.label}</span>
+                    <span className="font-mono text-xs">{p.percent}%</span>
+                  </div>
+                  <ProgressBar value={p.percent} accent={p.percent < 50} />
+                  <p className="mt-1 text-[10px] text-[hsl(var(--muted-foreground))]">{p.detail}</p>
                 </div>
-                <ProgressBar value={p.percent} accent={p.percent < 60} />
-                <p className="mt-1 text-[10px] text-[hsl(var(--muted-foreground))]">{p.detail}</p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
-                Recommended interventions
-              </p>
-              <h2 className="mt-2 font-display text-2xl font-bold">
-                Turn a gap into a teaching move
-              </h2>
-            </div>
-            <Lightbulb size={21} className="text-[hsl(var(--secondary-foreground))]" />
-          </div>
-          <div className="mt-6 divide-y divide-[hsl(var(--border))]">
-            {interventions.map((item, i) => (
-              <div key={item.title} className="flex items-center gap-4 py-4 first:pt-0 last:pb-0">
-                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[hsl(var(--muted))] font-mono text-xs">
-                  {String(i + 1).padStart(2, "0")}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold">{item.title}</p>
-                  <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{item.detail}</p>
-                </div>
-                <button
-                  onClick={() => navigate("/help")}
-                  data-testid={`button-intervention-${i}`}
-                  className="shrink-0 text-xs font-bold text-[hsl(var(--secondary-foreground))]"
-                >
-                  {item.action}
-                </button>
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                  Role intent
+                </p>
+                <h2 className="mt-2 font-display text-2xl font-bold">What learners aim for</h2>
               </div>
-            ))}
+              <Badge tone="teal">live</Badge>
+            </div>
+            {roles.length === 0 ? (
+              <p className="mt-6 text-sm text-[hsl(var(--muted-foreground))]">
+                No role data yet.
+              </p>
+            ) : (
+              <div className="mt-6 space-y-3">
+                {roles.map((r) => (
+                  <div key={r.role} className="flex items-center gap-3">
+                    <div className="w-40 shrink-0 truncate text-sm font-bold">{r.role}</div>
+                    <div className="flex-1">
+                      <ProgressBar value={(r.count / maxRoleCount) * 100} />
+                    </div>
+                    <span className="w-8 shrink-0 text-right font-mono text-xs text-[hsl(var(--muted-foreground))]">
+                      {r.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))]">
+                  Newest learners · privacy-masked
+                </p>
+                <h2 className="mt-2 font-display text-2xl font-bold">Recent joiners</h2>
+              </div>
+              <Lightbulb size={20} className="text-[hsl(var(--secondary-foreground))]" />
+            </div>
+            {recent.length === 0 ? (
+              <p className="mt-6 text-sm text-[hsl(var(--muted-foreground))]">
+                No learners have signed up yet.
+              </p>
+            ) : (
+              <div className="mt-5 divide-y divide-[hsl(var(--border))]">
+                {recent.map((r, i) => (
+                  <div key={i} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
+                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[hsl(var(--secondary))] text-xs font-bold text-[hsl(var(--secondary-foreground))]">
+                      {r.name.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold">{r.name}</p>
+                      <p className="text-xs text-[hsl(var(--muted-foreground))]">{r.role}</p>
+                    </div>
+                    <span className="rounded-full bg-[hsl(var(--accent))] px-2 py-1 font-mono text-xs font-bold text-[hsl(var(--accent-foreground))]">
+                      {r.readiness}/100
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

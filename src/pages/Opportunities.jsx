@@ -1,58 +1,82 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
   Bookmark,
   Briefcase,
   CheckCircle2,
-  FileText,
-  Mail,
+  ExternalLink,
+  Linkedin,
   Search,
-  X,
 } from "lucide-react";
-import { Badge, Button, PageHeader, PageTransition, AnimatedNumber, EASE } from "@/components/ui";
-import { useOpportunities, useSaveOpportunity, useApplyOpportunity, useProfile } from "@/lib/api";
+import {
+  Badge,
+  Button,
+  PageHeader,
+  PageTransition,
+  AnimatedNumber,
+  EASE,
+} from "@/components/ui";
+import {
+  useOpenings,
+  useSaveOpening,
+  useMarkApplied,
+  useProfile,
+} from "@/lib/api";
+import { openAuthModal } from "@/components/AuthGate";
 
-function buildDraft(op, firstName = "Aarav") {
-  return [
-    `Subject: Interested in the ${op.title} opportunity`,
-    "",
-    `Hi ${op.company} team,`,
-    "",
-    "I’m building a Containerized REST API to deepen my Docker signal, and I’d love to learn more about how your team approaches product engineering.",
-    "",
-    "Best,",
-    firstName,
-  ].join("\n");
+function linkedinShareUrl(op, readiness) {
+  const text = `I'm building toward ${op.title}-level skills and just found this brief on Skilling — my Skill DNA match: ${op.match}%. Tracking my readiness (${readiness}/100) as I close the gap.`;
+  return `https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(text)}`;
 }
 
-export default function Opportunities() {
-  const { data: opportunities = [], isLoading, error } = useOpportunities();
+export default function Opportunities({ user }) {
+  const { data, isLoading, error } = useOpenings();
   const { data: profile } = useProfile();
-  const firstName = (profile?.user?.name || profile?.name || "Aarav").split(" ")[0];
-  const saveMutation = useSaveOpportunity();
-  const applyMutation = useApplyOpportunity();
-  const [emailOpenId, setEmailOpenId] = useState(null);
-  const [appliedStatusId, setAppliedStatusId] = useState(null);
+  const saveMutation = useSaveOpening();
+  const applyMutation = useMarkApplied();
   const [query, setQuery] = useState("");
   const [savedOnly, setSavedOnly] = useState(false);
+  const [appliedFlash, setAppliedFlash] = useState(null);
 
-  const visible = opportunities.filter(
-    (op) =>
-      `${op.title} ${op.company} ${op.location} ${op.tags.join(" ")}`
-        .toLowerCase()
-        .includes(query.toLowerCase()) && (!savedOnly || op.saved)
+  const openings = data?.openings ?? [];
+  const linkedinUrl = data?.profile?.linkedinUrl;
+  const readiness = data?.profile?.readiness ?? 0;
+
+  const visible = useMemo(
+    () =>
+      openings.filter((op) => {
+        const haystack = `${op.title} ${op.level} ${op.location} ${Object.keys(op.skills).join(" ")}`.toLowerCase();
+        if (query && !haystack.includes(query.toLowerCase())) return false;
+        if (savedOnly && !op.saved) return false;
+        return true;
+      }),
+    [openings, query, savedOnly]
   );
+
+  const onApply = (op) => {
+    if (!user) {
+      openAuthModal("register");
+      return;
+    }
+    /* Mark applied server-side, then open the real LinkedIn Jobs search */
+    if (!op.applied) applyMutation.mutate({ slug: op.slug, applied: true });
+    setAppliedFlash(op.slug);
+    window.open(op.applyUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const onShare = (op) => {
+    window.open(linkedinShareUrl(op, readiness), "_blank", "noopener,noreferrer");
+  };
 
   return (
     <PageTransition>
       <PageHeader
-        eyebrow="Opportunity matching / Live feed"
-        title="Find your next proving ground."
-        copy="Matches are explainable recommendations based on your Skill DNA, stored on the server. They are not live openings."
+        eyebrow="Opportunity matching / LinkedIn apply"
+        title="Roles matched to your real skills."
+        copy="Each brief is scored live against your Skill DNA on the server. Applying opens the matching LinkedIn Jobs search — your progress is tracked here."
         action={
-          <div className="flex items-center gap-2 rounded-lg bg-[hsl(var(--accent))] px-3 py-2 text-xs font-bold">
-            <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]" />{" "}
+          <div className="flex items-center gap-2 rounded-lg bg-[hsl(var(--accent))] px-3 py-2 text-xs font-bold text-[hsl(var(--accent-foreground))]">
             <AnimatedNumber value={visible.length} /> matches
           </div>
         }
@@ -67,7 +91,7 @@ export default function Opportunities() {
             onChange={(e) => setQuery(e.target.value)}
             data-testid="input-search-opportunities"
             className="w-full bg-transparent py-2 text-sm outline-none"
-            placeholder="Search by role, skill, or company"
+            placeholder="Search by role, level, or skill"
           />
         </div>
         <button
@@ -85,32 +109,21 @@ export default function Opportunities() {
 
       {isLoading ? (
         <div className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card))] p-12 text-center text-sm text-[hsl(var(--muted-foreground))]">
-          Loading opportunities…
+          Matching roles to your Skill DNA…
         </div>
       ) : error ? (
         <div className="rounded-2xl border border-dashed border-[hsl(var(--destructive))] bg-[hsl(var(--card))] p-12 text-center text-sm text-[hsl(var(--destructive))]">
-          Could not load opportunities: {error.message}
-        </div>
-      ) : visible.length === 0 ? (
-        <div
-          data-testid="empty-opportunities"
-          className="rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card))] p-12 text-center"
-        >
-          <Search className="mx-auto text-[hsl(var(--muted-foreground))]" size={22} />
-          <p className="mt-3 text-sm font-bold">No matching opportunities</p>
-          <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">
-            Try a different role, company, or skill.
-          </p>
+          Could not load openings: {error.message}
         </div>
       ) : (
         <div className="space-y-4">
           {visible.map((op, i) => (
             <motion.div
-              key={op.id}
+              key={op.slug}
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1, duration: 0.45, ease: EASE }}
-              data-testid={`opportunity-card-${op.id}`}
+              transition={{ delay: Math.min(i * 0.07, 0.3), duration: 0.45, ease: EASE }}
+              data-testid={`opportunity-card-${op.slug}`}
               className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-card)] transition hover:-translate-y-0.5 md:p-6"
             >
               <div className="flex flex-col gap-5 md:flex-row md:items-start">
@@ -125,15 +138,22 @@ export default function Opportunities() {
                         <Badge tone="accent">
                           <AnimatedNumber value={op.match} suffix="% match" />
                         </Badge>
+                        <Badge tone="muted">{op.level}</Badge>
                       </div>
                       <p className="mt-1 text-sm font-semibold text-[hsl(var(--muted-foreground))]">
-                        {op.company} <span className="mx-1">·</span> {op.location}
+                        {op.location}
+                        {op.location === "Remote" ? " · work from anywhere" : ""} · via LinkedIn Jobs
                       </p>
                     </div>
                     <button
-                      onClick={() => saveMutation.mutate(op.id)}
-                      data-testid={`button-save-${op.id}`}
+                      onClick={() =>
+                        user
+                          ? saveMutation.mutate(op.slug)
+                          : openAuthModal("register")
+                      }
+                      data-testid={`button-save-${op.slug}`}
                       className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]"
+                      title={op.saved ? "Remove from saved" : "Save this brief"}
                     >
                       <Bookmark
                         size={19}
@@ -143,91 +163,54 @@ export default function Opportunities() {
                     </button>
                   </div>
 
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {op.tags.map((tag, ti) => (
-                      <motion.span
-                        key={tag}
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.25 + ti * 0.08, duration: 0.3 }}
-                      >
-                        <Badge tone="muted">{tag}</Badge>
-                      </motion.span>
+                  <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">{op.blurb}</p>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {Object.entries(op.skills).map(([skill]) => (
+                      <Badge key={skill} tone="muted">
+                        {skill}
+                      </Badge>
                     ))}
                   </div>
 
-                  <div className="mt-5 flex items-start gap-2 rounded-lg bg-[hsl(var(--secondary))] p-3 text-xs leading-5 text-[hsl(var(--secondary-foreground))]">
-                    <FileText size={15} className="mt-0.5 shrink-0" />
+                  <div className="mt-4 flex items-start gap-2 rounded-lg bg-[hsl(var(--secondary))] p-3 text-xs leading-5 text-[hsl(var(--secondary-foreground))]">
                     <span>
-                      <strong>Why this match:</strong> {op.why}
+                      <strong>Match detail:</strong> {op.topGap}
                     </span>
                   </div>
 
                   <div className="mt-5 flex flex-wrap gap-2">
                     <Button
-                      onClick={() => {
-                        applyMutation.mutate({ id: op.id, applied: !op.applied });
-                        setAppliedStatusId(op.id);
-                      }}
+                      onClick={() => onApply(op)}
                       variant={op.applied ? "outline" : "primary"}
-                      testId={`button-apply-${op.id}`}
+                      testId={`button-apply-${op.slug}`}
                     >
                       {op.applied ? (
                         <>
-                          <CheckCircle2 size={15} /> Applied
+                          <CheckCircle2 size={15} /> Applied — open again
                         </>
                       ) : (
                         <>
-                          Express interest <ArrowRight size={15} />
+                          <Linkedin size={15} /> Apply on LinkedIn <ArrowRight size={15} />
                         </>
                       )}
                     </Button>
                     <Button
-                      onClick={() => setEmailOpenId(op.id)}
+                      onClick={() => onShare(op)}
                       variant="outline"
-                      testId={`button-email-${op.id}`}
+                      testId={`button-share-${op.slug}`}
                     >
-                      <Mail size={15} /> Draft email
+                      <ExternalLink size={15} /> Share to feed
                     </Button>
                   </div>
 
-                  {appliedStatusId === op.id && (
+                  {appliedFlash === op.slug && (
                     <p
-                      data-testid={`status-applied-${op.id}`}
+                      data-testid={`status-applied-${op.slug}`}
                       className="mt-3 text-xs font-bold text-[hsl(var(--secondary-foreground))]"
                     >
-                      {op.applied
-                        ? "Interest saved to the server."
-                        : "Interest removed."}
+                      Opened LinkedIn Jobs in a new tab — marked as applied here.
                     </p>
-                  )}
-
-                  {emailOpenId === op.id && (
-                    <div className="mt-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--muted))] p-4">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-bold">Draft to {op.company}</p>
-                        <button
-                          onClick={() => setEmailOpenId(null)}
-                          data-testid={`button-close-email-${op.id}`}
-                        >
-                          <X size={15} />
-                        </button>
-                      </div>
-                      <p
-                        data-testid={`draft-email-${op.id}`}
-                        className="mt-3 whitespace-pre-line text-xs leading-6 text-[hsl(var(--muted-foreground))]"
-                      >
-                        {buildDraft(op, firstName)}
-                      </p>
-                      <Button
-                        onClick={() => setEmailOpenId(null)}
-                        variant="accent"
-                        className="mt-3"
-                        testId={`button-save-email-${op.id}`}
-                      >
-                        <CheckCircle2 size={14} /> Save draft
-                      </Button>
-                    </div>
                   )}
                 </div>
               </div>
@@ -235,6 +218,32 @@ export default function Opportunities() {
           ))}
         </div>
       )}
+
+      <div className="mt-8 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+        <div className="flex items-start gap-4">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[hsl(var(--accent))] text-[hsl(var(--primary))]">
+            <Linkedin size={19} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-display text-lg font-bold">Your LinkedIn profile link</h3>
+            <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+              {linkedinUrl
+                ? `Connected: ${linkedinUrl}`
+                : "Add your LinkedIn profile URL so your applications and shares stay consistent."}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            testId="button-add-linkedin"
+            onClick={() => {
+              if (!user) return openAuthModal("register");
+              window.dispatchEvent(new CustomEvent("open-profile-edit"));
+            }}
+          >
+            {linkedinUrl ? "Edit link" : "Add link"}
+          </Button>
+        </div>
+      </div>
     </PageTransition>
   );
 }

@@ -1,42 +1,68 @@
-import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Box,
   CheckCircle2,
   Code,
+  ExternalLink,
   FileText,
   Lightbulb,
   Sparkles,
   Target,
 } from "lucide-react";
-import { Badge, Button, PageHeader, PageTransition, Reveal, ProgressBar, EASE } from "@/components/ui";
-import { useRoadmap, useToggleRoadmapStep } from "@/lib/api";
+import {
+  Badge,
+  Button,
+  PageHeader,
+  PageTransition,
+  Reveal,
+  ProgressBar,
+  EASE,
+} from "@/components/ui";
+import { useRoadmap, useSkills, useToggleRoadmapStep, useResources } from "@/lib/api";
+import { openAuthModal } from "@/components/AuthGate";
 
 const STEP_ICONS = {
   intent: Target,
   foundations: Code,
-  docker: Box,
-  assessment: Target,
+  build: Sparkles,
+  checkpoint: Target,
   evidence: FileText,
 };
 
-export default function Roadmap() {
+export default function Roadmap({ user }) {
   const { data, isLoading } = useRoadmap();
+  const { data: skillsData } = useSkills();
+  const { data: resourcesData } = useResources();
   const toggleMutation = useToggleRoadmapStep();
-  const [briefGenerated, setBriefGenerated] = useState(false);
-  const [generating, setGenerating] = useState(false);
 
   const steps = data?.steps ?? [];
   const done = data?.done ?? 0;
-  const total = data?.total ?? 5;
+  const total = data?.total ?? 0;
+
+  const gapSkill = skillsData?.nextBestSkill ?? "your next skill";
+  const role = skillsData?.role ?? "your target role";
+  const readiness = skillsData?.readiness ?? 0;
+
+  /* Suggest up to 3 real resources that teach the current gap skill */
+  const gapResources = (resourcesData?.resources ?? [])
+    .filter((r) => r.skills.includes(gapSkill))
+    .slice(0, 3);
+
+  const toggle = (stepId, isDone) => {
+    if (!user) return openAuthModal("register");
+    toggleMutation.mutate({ stepId, complete: !isDone });
+  };
 
   return (
     <PageTransition>
       <PageHeader
-        eyebrow="Skill intelligence / 03"
+        eyebrow="Skill intelligence / roadmap"
         title="Your next-best-skill roadmap"
-        copy="A focused sequence from gap to evidence. Start with Docker because it creates the clearest bridge to your target role."
-        action={<Badge tone="accent">{done} / {total} complete</Badge>}
+        copy={`A focused sequence from gap to proof, generated from your own Skill DNA. Right now the highest-leverage move for ${role} is ${gapSkill}.`}
+        action={
+          <Badge tone="accent">
+            {done} / {total} complete
+          </Badge>
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_.72fr]">
@@ -55,6 +81,10 @@ export default function Roadmap() {
 
           {isLoading ? (
             <p className="text-sm text-[hsl(var(--muted-foreground))]">Loading roadmap…</p>
+          ) : steps.length === 0 ? (
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+              Sign in to generate your personal roadmap.
+            </p>
           ) : (
             <div className="relative space-y-3">
               <motion.div
@@ -68,7 +98,7 @@ export default function Roadmap() {
                 const isDone = step.status === "complete";
                 const isNext = !isDone && step.status === "next";
                 const Icon = STEP_ICONS[step.id] || Sparkles;
-                const toggleable = ["docker", "assessment", "evidence"].includes(step.id);
+                const toggleable = ["foundations", "build", "checkpoint", "evidence"].includes(step.id);
                 return (
                   <motion.div
                     key={step.id}
@@ -109,9 +139,7 @@ export default function Roadmap() {
                     </div>
                     {toggleable ? (
                       <button
-                        onClick={() =>
-                          toggleMutation.mutate({ stepId: step.id, complete: !isDone })
-                        }
+                        onClick={() => toggle(step.id, isDone)}
                         data-testid={`button-toggle-${step.id}`}
                         className={`rounded-lg px-3 py-2 text-xs font-bold ${
                           isDone
@@ -119,7 +147,7 @@ export default function Roadmap() {
                             : "border border-[hsl(var(--border))] hover:bg-[hsl(var(--muted))]"
                         }`}
                       >
-                        {isDone ? "Complete" : step.id === "docker" ? "Start" : "Mark done"}
+                        {isDone ? "Complete" : isNext ? "Start" : "Mark done"}
                       </button>
                     ) : (
                       <motion.span
@@ -149,56 +177,61 @@ export default function Roadmap() {
           >
             <div className="flex items-center justify-between">
               <Badge tone="accent">Build brief</Badge>
-              <FileText size={18} className="text-[hsl(var(--accent))]" />
+              <Sparkles size={18} className="text-[hsl(var(--accent))]" />
             </div>
-            <h2 className="mt-5 font-display text-2xl font-bold">Containerized REST API</h2>
+            <h2 className="mt-5 font-display text-2xl font-bold">
+              {gapSkill} in practice
+            </h2>
             <p className="mt-3 text-sm leading-6 text-white/60">
-              Build a small Node.js service, package it with Docker, and document the path from local
-              run to portable deployment.
+              Learn {gapSkill} from a real resource in the library, then prove it: build something
+              small and real, and push it to GitHub. That artifact becomes evidence recruiters can
+              read — worth more than any score alone.
             </p>
             <Button
-              onClick={() => {
-                if (briefGenerated || generating) return;
-                setGenerating(true);
-                window.setTimeout(() => {
-                  setGenerating(false);
-                  setBriefGenerated(true);
-                }, 1100);
-              }}
+              onClick={() => (window.location.href = "/student/resources")}
               variant="accent"
               className="mt-6 w-full"
-              testId="button-generate-brief"
+              testId="button-open-resources"
             >
-              {generating ? (
-                <span className="flex items-center gap-2">
-                  <span className="thinking-dots" /> Analyzing your skill gap...
-                </span>
-              ) : briefGenerated ? (
-                <>
-                  <CheckCircle2 size={15} /> Brief generated
-                </>
-              ) : (
-                <>
-                  <FileText size={15} /> Generate project brief
-                </>
-              )}
+              Learn {gapSkill} from real lectures <ExternalLink size={15} />
             </Button>
-            {briefGenerated && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                data-testid="project-brief"
-                className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4 text-xs leading-6 text-white/70"
-              >
-                <p className="font-bold text-white">Definition of done</p>
-                <ul className="mt-2 list-disc space-y-1 pl-4">
-                  <li>GET /health returns a useful status</li>
-                  <li>One Dockerfile and one local run command</li>
-                  <li>README explains the trade-off</li>
-                </ul>
-              </motion.div>
-            )}
           </Reveal>
+
+          {gapResources.length > 0 && (
+            <Reveal
+              delay={0.22}
+              className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-display text-lg font-bold">
+                  Real resources for {gapSkill}
+                </h3>
+                <Lightbulb size={17} className="text-[hsl(var(--secondary-foreground))]" />
+              </div>
+              <div className="mt-4 space-y-2">
+                {gapResources.map((r) => (
+                  <a
+                    key={r.id}
+                    href={r.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid={`roadmap-resource-${r.id}`}
+                    className="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] p-3 transition hover:border-[hsl(var(--secondary-foreground))]/40 hover:bg-[hsl(var(--muted))]"
+                  >
+                    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))]">
+                      <ExternalLink size={14} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold">{r.title}</p>
+                      <p className="text-[10px] text-[hsl(var(--muted-foreground))]">
+                        {r.provider} · {r.duration}
+                      </p>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </Reveal>
+          )}
 
           <Reveal
             delay={0.3}
@@ -206,15 +239,10 @@ export default function Roadmap() {
           >
             <h3 className="font-display text-lg font-bold">Why this, now?</h3>
             <p className="mt-3 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
-              Docker sits at the intersection of your Node.js progress and the platform skills asked for
-              in 2 of 3 demo opportunities.
+              {gapSkill} is currently your lowest-scored skill (readiness {readiness}/100 overall).
+              It was chosen by the same engine that ranks your opportunities — closing it lifts
+              every match you see.
             </p>
-            <div className="mt-5 flex items-center gap-3">
-              <div className="grid h-9 w-9 place-items-center rounded-lg bg-[hsl(var(--accent))]">
-                <Lightbulb size={16} />
-              </div>
-              <span className="text-xs font-bold">Highest leverage per hour invested</span>
-            </div>
           </Reveal>
         </div>
       </div>

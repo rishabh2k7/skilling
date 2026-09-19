@@ -34,9 +34,10 @@ export const useApp = () => useContext(AppContext);
 export const STUDENT_NAV = [
   { label: "Overview", path: "/student", icon: Home },
   { label: "Skill DNA", path: "/student/skills", icon: Radar },
-  { label: "Assessment", path: "/student/assessment", icon: Target },
   { label: "Roadmap", path: "/student/roadmap", icon: Route },
+  { label: "Resources", path: "/student/resources", icon: BookOpen },
   { label: "Opportunities", path: "/student/opportunities", icon: Trophy },
+  { label: "Checkpoint", path: "/student/assessment", icon: Target },
 ];
 
 const ROLE_NAVS = {
@@ -92,6 +93,23 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
     setAuthMode(mode);
     setAuthOpen(true);
   };
+
+  /* Any page can request the auth modal (e.g. AuthGate after a 401) */
+  useEffect(() => {
+    const handler = (e) => openAuth(e.detail || "register");
+    window.addEventListener("open-auth", handler);
+    return () => window.removeEventListener("open-auth", handler);
+  }, []);
+
+  /* Opportunities page opens the profile modal to add a LinkedIn URL */
+  useEffect(() => {
+    const handler = () => {
+      if (!user) return;
+      setProfileOpen(true);
+    };
+    window.addEventListener("open-profile-edit", handler);
+    return () => window.removeEventListener("open-profile-edit", handler);
+  }, [user]);
 
   const initials = user
     ? user.name.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase()
@@ -199,7 +217,7 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
           ) : (
             <div className="space-y-2">
               <p className="text-[10px] font-bold uppercase tracking-wider text-white/45">
-                Browsing as demo
+                Browsing as guest
               </p>
               <div className="flex gap-2">
                 <button
@@ -258,7 +276,7 @@ export function AppLayout({ children, navigate, role, theme, toggleTheme }) {
                   : "Academia workspace"}{" "}
               <span className="mx-2 text-[hsl(var(--border))]">/</span>{" "}
               <span className="text-[hsl(var(--foreground))]">
-                {user ? "Personal data" : "Demo data"}
+                {user ? "Your data" : "Sign in for your data"}
               </span>
             </div>
           </div>

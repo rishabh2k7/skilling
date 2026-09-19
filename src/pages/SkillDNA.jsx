@@ -4,18 +4,29 @@ import { ArrowRight, Lightbulb, Radar } from "lucide-react";
 import { Badge, Button, PageHeader, PageTransition, Reveal, AnimatedNumber, ProgressBar, EASE } from "@/components/ui";
 import { useSkills, useUpdateSkills } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import AuthGate from "@/components/AuthGate";
 
-const SIGNAL_SOURCES = [
-  ["Coursework", "React Foundations", "verified", 88],
-  ["Assessment", "JavaScript checkpoint", "verified", 76],
-  ["Evidence", "2 projects linked", "in progress", 54],
-];
-
-export default function SkillDNA({ navigate }) {
+export default function SkillDNA({ navigate, user }) {
   const [view, setView] = useState("bars");
   const { data, isLoading } = useSkills();
   const updateSkills = useUpdateSkills();
-  const { user } = useAuth();
+
+  /* Guests have no personal data to show */
+  if (!user) {
+    return (
+      <PageTransition>
+        <PageHeader
+          eyebrow="Skill intelligence / 01"
+          title="Your Skill DNA"
+          copy="A living view of the capabilities behind your target role — seeded at signup, sharpened by checkpoints and completed resources."
+        />
+        <AuthGate
+          title="Skill DNA needs an account."
+          copy="Sign up free and we seed your starting Skill DNA for your target role in one step. Every score after that is earned: checkpoints, completed lectures, and honest self-edits."
+        />
+      </PageTransition>
+    );
+  }
 
   const skills = data?.skills ?? [];
   const readiness = data?.readiness ?? 64;
@@ -211,11 +222,12 @@ export default function SkillDNA({ navigate }) {
               <span className="font-mono text-[10px] uppercase tracking-wider">Explainable gap</span>
             </div>
             <h2 className="mt-4 font-display text-2xl font-bold">
-              {(data?.nextBestSkill ?? "Docker")} is your highest-leverage move.
+              {(data?.nextBestSkill ?? "Your weakest skill")} is your highest-leverage move.
             </h2>
             <p className="mt-3 text-sm leading-6 text-white/60">
-              It unlocks the most adjacent opportunities while reinforcing your Node.js foundation. A
-              small project here has an outsized signal.
+              It has the lowest score in your DNA for this role, which means every point you add lifts
+              your readiness fastest. Learn it from a real resource, validate it in a checkpoint, then
+              ship something small.
             </p>
             <button
               className="mt-5 flex items-center gap-2 text-sm font-bold text-[hsl(var(--accent))]"
@@ -231,23 +243,24 @@ export default function SkillDNA({ navigate }) {
             className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6"
           >
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold">Signal sources</h3>
+              <h3 className="font-display text-lg font-bold">How scores move</h3>
               <Radar size={18} className="text-[hsl(var(--muted-foreground))]" />
             </div>
-            <div className="mt-5 space-y-4">
-              {SIGNAL_SOURCES.map(([kind, detail, status, value]) => (
-                <div key={kind}>
-                  <div className="flex justify-between text-xs">
-                    <span className="font-semibold">
-                      {kind} <span className="text-[hsl(var(--muted-foreground))]">· {detail}</span>
-                    </span>
-                    <span className="font-mono text-[10px]">{status}</span>
-                  </div>
-                  <div className="mt-2">
-                    <ProgressBar value={value} />
-                  </div>
-                </div>
-              ))}
+            <div className="mt-5 space-y-4 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+              <p>
+                <strong className="text-[hsl(var(--foreground))]">Checkpoints:</strong> each correct
+                answer in a graded checkpoint adds +2 to that skill — measured, not self-reported.
+              </p>
+              <p>
+                <strong className="text-[hsl(var(--foreground))]">Manual edits:</strong> use the
+                sliders to correct a score when reality drifts (you already knew this skill, or a
+                resource moved it). Readiness and next-best-skill recompute server-side either way.
+              </p>
+              <p>
+                <strong className="text-[hsl(var(--foreground))]">Readiness</strong> is the average
+                of all your scores; <strong className="text-[hsl(var(--foreground))]">next best skill</strong>{" "}
+                is always your current lowest.
+              </p>
             </div>
           </Reveal>
         </div>

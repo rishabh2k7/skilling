@@ -2,7 +2,32 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowRight, Compass, Lightbulb, Radar, Route, FileText, Sun, Moon } from "lucide-react";
 import { Badge, Brand, Button, EASE, PageTransition, Reveal, AnimatedNumber } from "@/components/ui";
-import { SKILLS, HERO_SKILLS } from "@/data/skillingData";
+
+/* Illustrative sample profile for the landing-page visual only —
+   the live app reads each user's real Skill DNA from the API. */
+const SAMPLE_SKILLS = [
+  { name: "JavaScript", value: 90 },
+  { name: "React", value: 82 },
+  { name: "SQL", value: 70 },
+  { name: "Node.js", value: 65 },
+];
+
+const HERO_SKILLS = [
+  ["Python", "8%", "18%", "delay-1"],
+  ["React", "57%", "11%", "delay-3"],
+  ["SQL", "78%", "28%", "delay-2"],
+  ["Docker", "24%", "70%", "delay-4"],
+  ["AI", "69%", "75%", "delay-2"],
+  ["TypeScript", "42%", "86%", "delay-1"],
+  ["AWS", "87%", "58%", "delay-3"],
+  ["JavaScript", "28%", "34%", "delay-2"],
+  ["Node.js", "52%", "42%", "delay-4"],
+  ["Machine Learning", "68%", "20%", "delay-1"],
+  ["Git", "16%", "55%", "delay-3"],
+  ["PostgreSQL", "76%", "83%", "delay-2"],
+  ["Cloud", "86%", "34%", "delay-4"],
+  ["Cybersecurity", "7%", "78%", "delay-1"],
+];
 
 const METHOD = [
   ["01", "Map the destination", "Start with a role you can name, then see the capability pattern behind it.", Compass],
@@ -95,10 +120,10 @@ export default function Landing({ navigate, theme, toggleTheme }) {
           </a>
           <button
             onClick={() => navigate("/student")}
-            data-testid="button-demo-nav"
+            data-testid="button-open-app-nav"
             className="font-bold text-[hsl(var(--accent))]"
           >
-            Open demo <ArrowRight className="ml-1 inline" size={14} />
+            Open the app <ArrowRight className="ml-1 inline" size={14} />
           </button>
           <button
             onClick={toggleTheme}
@@ -120,10 +145,10 @@ export default function Landing({ navigate, theme, toggleTheme }) {
           </button>
           <button
             onClick={() => navigate("/student")}
-            data-testid="button-mobile-demo"
+            data-testid="button-mobile-open"
             className="rounded-lg border border-white/20 px-3 py-2 text-xs font-bold"
           >
-            View demo
+            Open app
           </button>
         </div>
       </header>
@@ -143,7 +168,7 @@ export default function Landing({ navigate, theme, toggleTheme }) {
             </p>
             <div className="mt-10 flex flex-wrap gap-3">
               <Button onClick={() => navigate("/student")} variant="accent" testId="button-start-exploring">
-                Explore your Skill DNA <ArrowRight size={16} />
+                Start free — build your Skill DNA <ArrowRight size={16} />
               </Button>
               <Button
                 onClick={() => navigate("/industry")}
@@ -239,7 +264,7 @@ export default function Landing({ navigate, theme, toggleTheme }) {
                 data-testid="button-see-dna"
                 className="mt-8 inline-flex items-center gap-2 font-bold text-[hsl(var(--secondary-foreground))] transition hover:gap-3"
               >
-                See a sample Skill DNA <ArrowRight size={16} />
+                Build your Skill DNA <ArrowRight size={16} />
               </button>
             </Reveal>
             <Reveal
@@ -249,7 +274,7 @@ export default function Landing({ navigate, theme, toggleTheme }) {
               <div className="flex items-start justify-between">
                 <div>
                   <span className="font-mono text-xs text-[hsl(var(--muted-foreground))]">
-                    DEMO PROFILE / 042
+                    YOUR PROFILE · SEEDED AT SIGNUP
                   </span>
                   <h3 className="mt-2 font-display text-2xl font-bold">Full Stack Developer</h3>
                 </div>
@@ -265,7 +290,7 @@ export default function Landing({ navigate, theme, toggleTheme }) {
                 </div>
               </div>
               <div className="mt-8 space-y-4">
-                {SKILLS.slice(0, 4).map((s, i) => (
+                {SAMPLE_SKILLS.map((s, i) => (
                   <motion.div
                     key={s.name}
                     initial={{ opacity: 0, x: -8 }}
@@ -299,7 +324,7 @@ export default function Landing({ navigate, theme, toggleTheme }) {
       <footer className="border-t border-white/10 bg-[hsl(var(--primary))] px-5 py-10 lg:px-10">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 text-sm text-[hsl(var(--primary-foreground))]/55 md:flex-row">
           <Brand light />
-          <span>Demo environment · Built for clearer next steps</span>
+          <span>Real skills. Real evidence. Built for clearer next steps.</span>
         </div>
       </footer>
     </div>

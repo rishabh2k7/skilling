@@ -3,12 +3,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 async function api(path, options = {}) {
   const res = await fetch(`/api${path}`, {
     headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Request failed (${res.status})`);
+    const e = new Error(err.error || `Request failed (${res.status})`);
+    e.code = err.code;
+    e.status = res.status;
+    throw e;
   }
   return res.json();
 }
@@ -23,21 +27,36 @@ export function useSkills() {
   return useQuery({ queryKey: ["skills"], queryFn: () => api("/skills") });
 }
 
-export function useOpportunities() {
-  return useQuery({
-    queryKey: ["opportunities"],
-    queryFn: () => api("/opportunities"),
-  });
+export function useOpenings() {
+  return useQuery({ queryKey: ["openings"], queryFn: () => api("/openings") });
+}
+
+export function useResources() {
+  return useQuery({ queryKey: ["resources"], queryFn: () => api("/resources") });
 }
 
 export function useRoadmap() {
   return useQuery({ queryKey: ["roadmap"], queryFn: () => api("/roadmap") });
 }
 
-export function useNextAssessment() {
+export function useNextCheckpoint() {
   return useQuery({
-    queryKey: ["assessments", "next"],
-    queryFn: () => api("/assessments/next"),
+    queryKey: ["checkpoints", "next"],
+    queryFn: () => api("/checkpoints/next"),
+  });
+}
+
+export function useCheckpointStats() {
+  return useQuery({
+    queryKey: ["checkpoints", "stats"],
+    queryFn: () => api("/checkpoints/stats"),
+  });
+}
+
+export function useReadinessHistory() {
+  return useQuery({
+    queryKey: ["readiness", "history"],
+    queryFn: () => api("/readiness/history"),
   });
 }
 
@@ -49,26 +68,42 @@ export function useChatHistory(enabled) {
   });
 }
 
+export function useStats() {
+  return useQuery({ queryKey: ["stats"], queryFn: () => api("/stats") });
+}
+
 export function useAcademia() {
   return useQuery({ queryKey: ["academia"], queryFn: () => api("/academia") });
 }
 
 /* ---------- mutations ---------- */
 
-export function useSaveOpportunity() {
+export function useSaveOpening() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => api(`/opportunities/${id}/save`, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["opportunities"] }),
+    mutationFn: (slug) => api(`/openings/${slug}/save`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["openings"] }),
   });
 }
 
-export function useApplyOpportunity() {
+export function useMarkApplied() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, applied }) =>
-      api(`/opportunities/${id}/apply`, { method: "POST", body: { applied } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["opportunities"] }),
+    mutationFn: ({ slug, applied }) =>
+      api(`/openings/${slug}/applied`, { method: "POST", body: { applied } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["openings"] }),
+  });
+}
+
+export function useSetResourceStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }) =>
+      api(`/resources/${id}/status`, { method: "POST", body: { status } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["resources"] });
+      qc.invalidateQueries({ queryKey: ["skills"] });
+    },
   });
 }
 
@@ -81,17 +116,19 @@ export function useToggleRoadmapStep() {
   });
 }
 
-export function useSubmitAssessment() {
+export function useSubmitCheckpoint() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, selectedIndex }) =>
-      api(`/assessments/${id}/attempt`, {
+    mutationFn: ({ skill, answers }) =>
+      api(`/checkpoints/${encodeURIComponent(skill)}/submit`, {
         method: "POST",
-        body: { selectedIndex },
+        body: { answers },
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["assessments"] });
+      qc.invalidateQueries({ queryKey: ["checkpoints"] });
       qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["profile"] });
+      qc.invalidateQueries({ queryKey: ["readiness"] });
     },
   });
 }
@@ -99,8 +136,7 @@ export function useSubmitAssessment() {
 export function useSendChat() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (message) =>
-      api("/ai/chat", { method: "POST", body: { message } }),
+    mutationFn: (message) => api("/ai/chat", { method: "POST", body: { message } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["chat"] }),
   });
 }
@@ -112,6 +148,7 @@ export function useUpdateProfile() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["profile"] });
       qc.invalidateQueries({ queryKey: ["skills"] });
+      qc.invalidateQueries({ queryKey: ["openings"] });
       qc.invalidateQueries({ queryKey: ["auth"] }); // sidebar shows the user's name
     },
   });
@@ -124,6 +161,7 @@ export function useUpdateSkills() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["skills"] });
       qc.invalidateQueries({ queryKey: ["profile"] });
+      qc.invalidateQueries({ queryKey: ["readiness"] });
     },
   });
 }

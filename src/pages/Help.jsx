@@ -3,15 +3,49 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Bot, Radar, Send, Sparkles } from "lucide-react";
 import { Badge, Button, PageHeader, PageTransition, Reveal } from "@/components/ui";
 import { useChatHistory, useSendChat } from "@/lib/api";
+import { openAuthModal } from "@/components/AuthGate";
 
-const SUGGESTIONS = ["Why is Docker next?", "How do I show evidence?", "What should I do this week?"];
+const SUGGESTIONS = [
+  "What should I learn first?",
+  "Which resource should I pick?",
+  "How do checkpoints change my score?",
+  "What should I do this week?",
+];
 
-export default function Help() {
+export default function Help({ user }) {
   const [input, setInput] = useState("");
   const [optimistic, setOptimistic] = useState([]); // messages not yet confirmed by refetch
-  const { data: history = [] } = useChatHistory(true);
+  const { data: history = [] } = useChatHistory(!!user);
   const sendMutation = useSendChat();
   const scrollRef = useRef(null);
+
+  if (!user) {
+    return (
+      <PageTransition>
+        <PageHeader
+          eyebrow="Support desk / AI assistant"
+          title="A second pair of eyes for your next move."
+          copy="The assistant knows your Skill DNA, roadmap, and checkpoint history — so it needs an account to be useful."
+        />
+        <Reveal className="mx-auto max-w-xl rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-10 text-center">
+          <Radar className="mx-auto text-[hsl(var(--muted-foreground))]" size={26} />
+          <h2 className="mt-5 font-display text-2xl font-bold">Sign in to chat</h2>
+          <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+            The support desk reads your live data to give specific answers — which resource to pick
+            for your weakest skill, whether to take a checkpoint, or what to apply to on LinkedIn.
+          </p>
+          <Button
+            onClick={() => openAuthModal("register")}
+            variant="accent"
+            className="mt-6"
+            testId="button-help-signin"
+          >
+            Create a free account
+          </Button>
+        </Reveal>
+      </PageTransition>
+    );
+  }
 
   const thinking = sendMutation.isPending;
   const messages = [...history, ...optimistic];

@@ -8,13 +8,14 @@ import StudentOverview from "@/pages/StudentOverview";
 import SkillDNA from "@/pages/SkillDNA";
 import Assessment from "@/pages/Assessment";
 import Roadmap from "@/pages/Roadmap";
+import Resources from "@/pages/Resources";
 import Opportunities from "@/pages/Opportunities";
 import Industry from "@/pages/Industry";
 import Academia from "@/pages/Academia";
 import Help from "@/pages/Help";
 import NotFound from "@/pages/NotFound";
 import { AppLayout, AppProvider, useApp } from "@/components/AppLayout";
-import { AuthProvider } from "@/lib/auth";
+import { AuthProvider, useAuth } from "@/lib/auth";
 import { PageTransition } from "@/components/ui";
 
 const queryClient = new QueryClient();
@@ -39,6 +40,7 @@ function Routes() {
   const [isAcademia] = useRoute("/academia");
 
   const { role, setRole, theme, toggleTheme } = useApp();
+  const { user } = useAuth();
 
   useEffect(() => {
     if (location.startsWith("/industry")) setRole("industry");
@@ -57,14 +59,15 @@ function Routes() {
   }
 
   let page = null;
-  if (location === "/student") page = <StudentOverview navigate={go} />;
-  else if (location === "/student/skills") page = <SkillDNA navigate={go} />;
-  else if (location === "/student/assessment") page = <Assessment />;
-  else if (location === "/student/roadmap") page = <Roadmap />;
-  else if (location === "/student/opportunities") page = <Opportunities />;
-  else if (location === "/industry") page = <Industry navigate={go} />;
-  else if (location === "/academia") page = <Academia navigate={go} />;
-  else if (location === "/help") page = <Help />;
+  if (location === "/student") page = <StudentOverview navigate={go} user={user} />;
+  else if (location === "/student/skills") page = <SkillDNA navigate={go} user={user} />;
+  else if (location === "/student/assessment") page = <Assessment user={user} />;
+  else if (location === "/student/roadmap") page = <Roadmap user={user} />;
+  else if (location === "/student/resources") page = <Resources user={user} />;
+  else if (location === "/student/opportunities") page = <Opportunities user={user} />;
+  else if (location === "/industry") page = <Industry navigate={go} user={user} />;
+  else if (location === "/academia") page = <Academia navigate={go} user={user} />;
+  else if (location === "/help") page = <Help user={user} />;
   else
     return (
       <div className={theme === "dark" ? "dark" : ""}>
